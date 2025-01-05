@@ -62,7 +62,7 @@ void cli_transport::read(int client_socket){
     }
     while(hasrecvd >= 4){
       uint32_t header = ntohl(*((int*) buf));
-      header >>= 20;
+      header >>= 16;
       uint32_t length = header & 0x0FF;
       header >>= 8;
       uint32_t command = header;
@@ -101,9 +101,9 @@ void cli_transport::serialize(int command, int length, char* buf){
   int operation = 0;
   memset(packet, 0, length+4);
 
-  command <<= 28;
+  command <<= 24;
   operation = command | operation;
-  int length_cpy = length << 20;
+  int length_cpy = length << 16;
   operation = length_cpy | operation;
   int n_operation = htonl(operation);
   memcpy(packet, &n_operation, 4);
@@ -129,7 +129,7 @@ message_content* cli_transport::deserialize(const char* buffer){
   memset(message, 0, 30);
 
   uint32_t header = ntohl(*((int*) buffer));
-  header >>= 20;
+  header >>= 16;
   uint32_t length = header & 0x0FF;
   header >>= 8;
   uint32_t command = header;

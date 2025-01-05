@@ -199,19 +199,49 @@ void controller::handle_message(message_content* message){
 
             }
             break;
-          case 3:
+          //Set public card from server
+          //Change state to Flop
+          case 10:
             {
               current_state = FLOP;
+              char cardmsg[15];
+              int num1 = 0;
+              int num2 = 0;
+              int num3 = 0;
+              memset(cardmsg, 0, 15);
+
+              memcpy(cardmsg, message->get_charmessage(), 15);
+
+              memcpy(&num1, cardmsg, 4);
+              memcpy(&num2, cardmsg + 5, 4);
+              memcpy(&num3, cardmsg + 10, 4);
+
+              int h_num1 = ntohl(num1);
+              int h_num2 = ntohl(num2);
+              int h_num3 = ntohl(num3);
+
+              Card* card1 = new Card((card_suit)cardmsg[4], h_num1);
+              Card* card2 = new Card((card_suit)cardmsg[9], h_num2);
+              Card* card3 = new Card((card_suit)cardmsg[14], h_num3);
+
+              card1->show();
+              card2->show();
+              card3->show();
+
               cli_transport::get_instance()->serialize(1, 0, 0); 
             }
+            break;
+
           default:
             break;
         }
       }
       break;
 
+    //Flop turn
     case FLOP:
       {
+        
       }
       break;
 
