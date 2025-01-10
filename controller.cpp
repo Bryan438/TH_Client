@@ -76,30 +76,20 @@ void controller::handle_input(char* input){
     case START:
       break;
 
+      //Get the input and change status
     case PREFLOP_WAITING_ACTION:
       {
-        int valid_status = -1;
-        char decision = -1;
-
-        valid_status = check_valid_input(decision_condition[0], input[0]);
-
-        switch(valid_status){
+        int valid_input = waiting_action(input);
+        switch(valid_input){
           case -1:
-            printf("Invalid input\n");
             break;
           case RAISE:
             current_state = PREFLOP_WAITING_RAISE;
-
-            printf("New bet\n");
-            memcpy(result_list + 1, input, 1);
             break;
           default:
             current_state = PREFLOP;
-
-            memcpy(result_list + 1, input, 1);
-            cli_transport::get_instance()->serialize(10, 6, result_list); 
             break;
-        } 
+        }
       }
       break;
 
@@ -108,12 +98,46 @@ void controller::handle_input(char* input){
         //Get raise input
         int new_amount = atoi(input);
         printf("New amount = %d\n", new_amount);
-        if(new_amount < h_low || new_amount > h_high){
+        if(new_amount <= h_low || new_amount >= h_high){
           printf("Wrong Input\n");
           break;
         }
 
         current_state = PREFLOP;
+
+        int n_new_amount = htonl(new_amount);
+        memcpy(result_list + 2, &n_new_amount, 4);
+        cli_transport::get_instance()->serialize(10, 6, result_list); 
+      }
+      break;
+
+    case FLOP_WAITING_ACTION:
+      {
+        int valid_input = waiting_action(input);
+        switch(valid_input){
+          case -1:
+            break;
+          case RAISE:
+            current_state = FLOP_WAITING_RAISE;
+            break;
+          default:
+            current_state = FLOP;
+            break;
+        }
+      }
+      break;
+
+    case FLOP_WAITING_RAISE:
+      {
+        //Get raise input
+        int new_amount = atoi(input);
+        printf("New amount = %d\n", new_amount);
+        if(new_amount <= h_low || new_amount >= h_high){
+          printf("Wrong Input\n");
+          break;
+        }
+
+        current_state = FLOP;
 
         int n_new_amount = htonl(new_amount);
         memcpy(result_list + 2, &n_new_amount, 4);
@@ -169,34 +193,7 @@ void controller::handle_message(message_content* message){
           case 8:
             {
               current_state = PREFLOP_WAITING_ACTION;
-
-              memset(decision_condition, 0, 9);
-              memcpy(decision_condition, message->get_charmessage(), 9);
-              int high = 0;
-              int low = 0;
-              memcpy(&high, decision_condition + 1, 4);
-              h_high = ntohl(high);
-              memcpy(&low, decision_condition + 5, 4);
-              h_low = ntohl(low);
-
-              memset(result_list, 0, 6);
-              memcpy(result_list, decision_condition, 1);
-
-              if(decision_condition[0] & FOLD){
-                printf(" [F]old ");
-              } 
-              if(decision_condition[0] & RAISE){
-                printf(" [R]aise ");
-              } 
-              if(decision_condition[0] & CALL){
-                printf(" [C]all ");
-              } 
-              if(decision_condition[0] & CHECK){
-                printf(" c[H]eck ");
-              }
-
-              printf("\n");
-
+              show_available_decision(message);
             }
             break;
           //Set public card from server
@@ -241,7 +238,8 @@ void controller::handle_message(message_content* message){
     //Flop turn
     case FLOP:
       {
-        
+        current_state = FLOP_WAITING_ACTION;
+        show_available_decision(message);
       }
       break;
 
@@ -289,6 +287,59 @@ int controller::check_valid_input(int combined, char input){
       break;
   }
   return decision & combined ? decision : -1;
+}
+
+//Combine the decision page together to reduce redundancy
+void controller::show_available_decision(message_content* message){
+  memset(decision_condition, 0, 9);
+  memcpy(decision_condition, message->get_charmessage(), 9);
+  int high = 0;
+  int low = 0;
+  memcpy(&high, decision_condition + 1, 4);
+  h_high = ntohl(high);
+  memcpy(&low, decision_condition + 5, 4);
+  h_low = ntohl(low);
+
+  memset(result_list, 0, 6);
+  memcpy(result_list, decision_condition, 1);
+
+  if(decision_condition[0] & FOLD){
+    printf(" [F]old ");
+  } 
+  if(decision_condition[0] & RAISE){
+    printf(" [R]aise ");
+  } 
+  if(decision_condition[0] & CALL){
+    printf(" [C]all ");
+  } 
+  if(decision_condition[0] & CHECK){
+    printf(" c[H]eck ");
+  }
+
+  printf("\n");
+}
+
+//Redundacy part of the input code
+int controller::waiting_action(char* input){
+  int valid_status = -1;
+  char decision = -1;
+
+  valid_status = check_valid_input(decision_condition[0], input[0]);
+
+  switch(valid_status){
+    case -1:
+      printf("Invalid input\n");
+      break;
+    case RAISE:
+      printf("New bet\n");
+      memcpy(result_list + 1, input, 1);
+      break;
+    default:
+      memcpy(result_list + 1, input, 1);
+      cli_transport::get_instance()->serialize(10, 6, result_list); 
+      break;
+  } 
+  return valid_status;
 }
 
 

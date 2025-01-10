@@ -9,7 +9,8 @@ enum state{
   PREFLOP_WAITING_RAISE = 7,
 
   FLOP = 8,
-  FLOP_WAITING_ACTION = 9
+  FLOP_WAITING_ACTION = 9,
+  FLOP_WAITING_RAISE = 10
 };
 
 #include "player.h"
@@ -32,4 +33,6 @@ class controller: public observer{
     virtual void handle_input(char* input);
     virtual void handle_message(message_content* msg);
     int check_valid_input(int combined, char input);
+    void show_available_decision(message_content* msg);
+    int waiting_action(char* input);
 };
