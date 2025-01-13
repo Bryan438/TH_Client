@@ -145,6 +145,74 @@ void controller::handle_input(char* input){
       }
       break;
 
+    case TURN_WAITING_ACTION:
+      {
+        int valid_input = waiting_action(input);
+        switch(valid_input){
+          case -1:
+            break;
+          case RAISE:
+            current_state = TURN_WAITING_RAISE;
+            break;
+          default:
+            current_state = TURN;
+            break;
+        }
+      }
+      break;
+
+    case TURN_WAITING_RAISE:
+      {
+        //Get raise input
+        int new_amount = atoi(input);
+        printf("New amount = %d\n", new_amount);
+        if(new_amount <= h_low || new_amount >= h_high){
+          printf("Wrong Input\n");
+          break;
+        }
+
+        current_state = TURN;
+
+        int n_new_amount = htonl(new_amount);
+        memcpy(result_list + 2, &n_new_amount, 4);
+        cli_transport::get_instance()->serialize(10, 6, result_list); 
+      }
+      break;
+
+    case RIVER_WAITING_ACTION:
+      {
+        int valid_input = waiting_action(input);
+        switch(valid_input){
+          case -1:
+            break;
+          case RAISE:
+            current_state = RIVER_WAITING_RAISE;
+            break;
+          default:
+            current_state = RIVER;
+            break;
+        }
+      }
+      break;
+
+    case RIVER_WAITING_RAISE:
+      {
+        //Get raise input
+        int new_amount = atoi(input);
+        printf("New amount = %d\n", new_amount);
+        if(new_amount <= h_low || new_amount >= h_high){
+          printf("Wrong Input\n");
+          break;
+        }
+
+        current_state = RIVER;
+
+        int n_new_amount = htonl(new_amount);
+        memcpy(result_list + 2, &n_new_amount, 4);
+        cli_transport::get_instance()->serialize(10, 6, result_list); 
+      }
+      break;
+      
     default:
       break;
   }
@@ -238,11 +306,82 @@ void controller::handle_message(message_content* message){
     //Flop turn
     case FLOP:
       {
-        current_state = FLOP_WAITING_ACTION;
-        show_available_decision(message);
+        switch(message->get_command()){
+          case 8:
+            current_state = FLOP_WAITING_ACTION;
+            show_available_decision(message);
+            break;
+          //Set public card from server
+          //Change state to Turn
+          case 10:
+            {
+              current_state = TURN;
+              char cardmsg[15];
+              int num1 = 0;
+              memset(cardmsg, 0, 15);
+              memcpy(cardmsg, message->get_charmessage(), 15);
+
+              memcpy(&num1, cardmsg, 4);
+              int h_num1 = ntohl(num1);
+              Card* card1 = new Card((card_suit)cardmsg[4], h_num1);
+              card1->show();
+
+              cli_transport::get_instance()->serialize(1, 0, 0); 
+            }
+            break;
+          default:
+            break;
+        }
       }
       break;
 
+    case TURN:
+      {
+        switch(message->get_command()){
+          case 8:
+            current_state = TURN_WAITING_ACTION;
+            show_available_decision(message);
+            break;
+          //Set public card from server
+          //Change state to RIVER
+          case 10:
+            {
+              current_state = RIVER;
+              char cardmsg[15];
+              int num1 = 0;
+              memset(cardmsg, 0, 15);
+              memcpy(cardmsg, message->get_charmessage(), 15);
+
+              memcpy(&num1, cardmsg, 4);
+              int h_num1 = ntohl(num1);
+              Card* card1 = new Card((card_suit)cardmsg[4], h_num1);
+              card1->show();
+
+              cli_transport::get_instance()->serialize(1, 0, 0); 
+            }
+            break;
+          default:
+            break;
+        }
+      }
+      break;
+
+    case RIVER: 
+      {
+        switch(message->get_command()){
+          case 8:
+            current_state = RIVER_WAITING_ACTION;
+            show_available_decision(message);
+            break;
+            //TODO RIVER finishes, it is the time to decide the winner
+          case 10:
+            {
+            }
+            break;
+          default:
+            break;
+        }
+      }
     default:
       break;
   }
