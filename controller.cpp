@@ -31,10 +31,8 @@ controller::controller(){
 }
 
 void controller::start(){
-  int decision;
   char player_name[50];
   char player_decision[10];
-  int bet; 
 
   memset(player_name, 0, 50);
   memset(player_decision, 0, 50);
@@ -374,8 +372,23 @@ void controller::handle_message(message_content* message){
             show_available_decision(message);
             break;
             //TODO RIVER finishes, it is the time to decide the winner
-          case 10:
+          case 12:
             {
+              char cardmsg[8];
+              int money_change = 0;
+              int remaining = 0;
+              memset(cardmsg, 0, 8);
+              memcpy(cardmsg, message->get_charmessage(), 8);
+
+              memcpy(&money_change, cardmsg, 4);
+              memcpy(&remaining, cardmsg + 4, 4);
+
+              int h_mc = ntohl(money_change);
+              int h_remaining = ntohl(remaining);
+              
+              printf("You are the winner! You earn %d\n, Your current money is %d\n", h_mc, h_remaining); 
+              player1->set_bet(h_remaining);
+
             }
             break;
           default:
@@ -388,12 +401,28 @@ void controller::handle_message(message_content* message){
 
   switch(message->get_command()){
     case 2:
-      {
-        printf("%s\n", message->get_charmessage());
-        break;
-      }
-    case 4:
+      printf("%s\n", message->get_charmessage());
       break;
+
+    case 12:
+      {
+        char cardmsg[8];
+        int cur_bet = 0;
+        int total_p = 0;
+        memset(cardmsg, 0, 8);
+        memcpy(cardmsg, message->get_charmessage(), 8);
+
+        memcpy(&cur_bet, cardmsg, 4);
+        memcpy(&total_p, cardmsg + 4, 4);
+
+        int h_num1 = ntohl(cur_bet);
+        int h_num2 = ntohl(total_p);
+        printf("Current bet is %d\n, total pot is %d\n", h_num1, h_num2);
+        cli_transport::get_instance()->serialize(13, 0, 0); 
+      }
+
+      break;
+
     case 5:
       break;
     case 8:
@@ -461,7 +490,6 @@ void controller::show_available_decision(message_content* message){
 //Redundacy part of the input code
 int controller::waiting_action(char* input){
   int valid_status = -1;
-  char decision = -1;
 
   valid_status = check_valid_input(decision_condition[0], input[0]);
 
