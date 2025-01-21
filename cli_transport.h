@@ -1,5 +1,6 @@
 #include "observer.h"
 #include "message_content.h"
+#include <cstddef>
 
 class cli_transport{
   private:
@@ -7,10 +8,15 @@ class cli_transport{
     int client_socket;
     observer* p_listener = NULL;
     static cli_transport* instance;
+    char ip_addr[16]; 
+    int port;
   public:
     ~cli_transport(){};
 
     static cli_transport* get_instance();
+
+    void set_ip_addr(char* ip);
+    void set_port(int p);
 
     int start_client();
     int send_msg(char* message, int length);

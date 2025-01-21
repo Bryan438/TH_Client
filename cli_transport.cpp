@@ -7,8 +7,8 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <thread>
-
 #include "cli_transport.h"
 #include "message_content.h"
 
@@ -25,14 +25,23 @@ cli_transport::cli_transport(){
   client_socket = -1;
 }
 
+void cli_transport::set_ip_addr(char* addr){
+  memset(ip_addr, 0, 16);
+  memcpy(ip_addr, addr, strlen(addr));
+}
+
+void cli_transport::set_port(int p){
+  port = p;
+}
+
 int cli_transport::start_client(){
   client_socket = socket(AF_INET, SOCK_STREAM, 0); 
 
   // specifying address 
   sockaddr_in serverAddress; 
   serverAddress.sin_family = AF_INET; 
-  serverAddress.sin_port = htons(4000); 
-  serverAddress.sin_addr.s_addr = INADDR_ANY; 
+  serverAddress.sin_port = htons(port); 
+  serverAddress.sin_addr.s_addr = inet_addr(ip_addr); 
 
   // sending connection request 
   connect(client_socket, (struct sockaddr*)&serverAddress, 
