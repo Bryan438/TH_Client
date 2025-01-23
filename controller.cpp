@@ -67,7 +67,6 @@ void controller::handle_input(char* input){
       break;
 
     case INIT_WAITING_BET:
-      //TODO
       current_state = INIT;
       break;
 
@@ -96,7 +95,7 @@ void controller::handle_input(char* input){
         //Get raise input
         int new_amount = atoi(input);
         printf("New amount = %d\n", new_amount);
-        if(new_amount <= h_low || new_amount >= h_high){
+        if(new_amount <= h_low || new_amount > h_high){
           printf("Wrong Input\n");
           break;
         }
@@ -130,7 +129,7 @@ void controller::handle_input(char* input){
         //Get raise input
         int new_amount = atoi(input);
         printf("New amount = %d\n", new_amount);
-        if(new_amount <= h_low || new_amount >= h_high){
+        if(new_amount <= h_low || new_amount > h_high){
           printf("Wrong Input\n");
           break;
         }
@@ -164,7 +163,7 @@ void controller::handle_input(char* input){
         //Get raise input
         int new_amount = atoi(input);
         printf("New amount = %d\n", new_amount);
-        if(new_amount <= h_low || new_amount >= h_high){
+        if(new_amount <= h_low || new_amount > h_high){
           printf("Wrong Input\n");
           break;
         }
@@ -198,7 +197,7 @@ void controller::handle_input(char* input){
         //Get raise input
         int new_amount = atoi(input);
         printf("New amount = %d\n", new_amount);
-        if(new_amount <= h_low || new_amount >= h_high){
+        if(new_amount <= h_low || new_amount > h_high){
           printf("Wrong Input\n");
           break;
         }

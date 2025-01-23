@@ -1,5 +1,5 @@
 CC = g++
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -Bstatic 
 
 thclient: th_client.o controller.o card.o player.o cli_transport.o message_content.o observer.o input_thread.o
 	$(CC) $(CFLAGS) -o thclient th_client.o controller.o card.o player.o cli_transport.o message_content.o observer.o input_thread.o
