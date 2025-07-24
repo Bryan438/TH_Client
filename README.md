@@ -5,11 +5,13 @@
 > **Status:** 🛠 Alpha – playable, still under heavy refactor  
 > **Repos:**  
 > • Server (this repo)  
-> • Client → https://github.com/Bryan438/TH_Client  
+> • Client → https://github.com/Bryan438/TH_Client
+![GitHub last commit](https://img.shields.io/github/last-commit/Bryan438/Texas_Holdem_1?logo=github)
+![Lines of code](https://img.shields.io/tokei/lines/github/Bryan438/Texas_Holdem_1)
+![License](https://img.shields.io/github/license/Bryan438/Texas_Holdem_1)
 ---
 
 ## Table of Contents
-
 ---
 
 ## Project Goal
