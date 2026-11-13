@@ -35,7 +35,7 @@ void controller::start(){
   char player_decision[10];
 
   memset(player_name, 0, 50);
-  memset(player_decision, 0, 50);
+  memset(player_decision, 0, 10);
   cli_transport::get_instance()->set_listener(this);
   cli_transport::get_instance()->start_client();
 
@@ -370,26 +370,6 @@ void controller::handle_message(message_content* message){
             current_state = RIVER_WAITING_ACTION;
             show_available_decision(message);
             break;
-            //TODO RIVER finishes, it is the time to decide the winner
-          case 12:
-            {
-              char cardmsg[8];
-              int money_change = 0;
-              int remaining = 0;
-              memset(cardmsg, 0, 8);
-              memcpy(cardmsg, message->get_charmessage(), 8);
-
-              memcpy(&money_change, cardmsg, 4);
-              memcpy(&remaining, cardmsg + 4, 4);
-
-              int h_mc = ntohl(money_change);
-              int h_remaining = ntohl(remaining);
-              
-              printf("You are the winner! You earn %d\n, Your current money is %d\n", h_mc, h_remaining); 
-              player1->set_bet(h_remaining);
-
-            }
-            break;
           default:
             break;
         }
@@ -401,6 +381,28 @@ void controller::handle_message(message_content* message){
   switch(message->get_command()){
     case 2:
       printf("%s\n", message->get_charmessage());
+      break;
+
+    // Money won this hand
+    case 20:
+      {
+        char moneymsg[8];
+        memset(moneymsg, 0, 8);
+        memcpy(moneymsg, message->get_charmessage(), message->get_length() < 8 ? message->get_length() : 8);
+        int won = 0;
+        int remaining = 0;
+        memcpy(&won, moneymsg, 4);
+        memcpy(&remaining, moneymsg + 4, 4);
+        printf("You win %d, you now have %d\n", (int)ntohl(won), (int)ntohl(remaining));
+        player1->set_bet(ntohl(remaining));
+      }
+      break;
+
+    // Hand result, sent to everyone. Go back to the lobby state for the next hand.
+    case 28:
+      printf("%s\n", message->get_charmessage());
+      printf("Enter 6 to start the next hand\n");
+      current_state = INIT;
       break;
 
     case 12:

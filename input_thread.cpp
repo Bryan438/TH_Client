@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include <string.h>
 #include <stdlib.h>
 #include <cstring>
@@ -26,8 +27,8 @@ void input_thread::start(){
 
 void input_thread::read(){
   char* input = new char[1000];
-  while(true){
-    std::cin >> input;
+  // Stop on EOF instead of spinning on the last input forever.
+  while(std::cin >> std::setw(1000) >> input){
     p_listener->handle_input(input); 
   }
   delete[] input;
