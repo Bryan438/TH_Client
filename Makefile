@@ -1,34 +1,21 @@
-CC = g++
-CFLAGS = -Wall -g -Bstatic -pthread
+CXX ?= c++
+CXXFLAGS = -std=c++17 -Wall -g -pthread
 
-thclient: th_client.o controller.o card.o player.o cli_transport.o message_content.o observer.o input_thread.o
-	$(CC) $(CFLAGS) -o thclient th_client.o controller.o card.o player.o cli_transport.o message_content.o observer.o input_thread.o
+SRCS = net.cpp ui.cpp
+HEADERS = $(wildcard *.h)
 
-th_client.o: th_client.cpp controller.h 
-	$(CC) $(CFLAGS) -c th_client.cpp 
+thclient: th_client.cpp $(SRCS) $(HEADERS) third_party/json.hpp
+	$(CXX) $(CXXFLAGS) -o $@ th_client.cpp $(SRCS)
 
-controller.o: card.h controller.h controller.cpp player.h cli_transport.h message_content.h observer.h input_thread.h
-	$(CC) $(CFLAGS) -c controller.cpp 
+TEST_FLAGS = $(CXXFLAGS) -I. -fsanitize=address,undefined -fno-omit-frame-pointer
 
-card.o: card.h card.cpp
-	$(CC) $(CFLAGS) -c card.cpp
+tests/run_tests: $(wildcard tests/*.cpp) $(SRCS) $(HEADERS) third_party/json.hpp
+	$(CXX) $(TEST_FLAGS) -o $@ $(wildcard tests/*.cpp) $(SRCS)
 
-
-player.o: player.h player.cpp
-	$(CC) $(CFLAGS) -c player.cpp
-
-cli_transport.o: cli_transport.h cli_transport.cpp observer.h
-	$(CC) $(CFLAGS) -c cli_transport.cpp
-
-message_content.o: message_content.h message_content.cpp
-	$(CC) $(CFLAGS) -c message_content.cpp
-
-observer.o: observer.h observer.cpp
-	$(CC) $(CFLAGS) -c observer.cpp
-
-input_thread.o: input_thread.h input_thread.cpp observer.h
-	$(CC) $(CFLAGS) -c input_thread.cpp
+test: tests/run_tests
+	./tests/run_tests
 
 clean:
-	rm -f *.o thclient
+	rm -f *.o thclient tests/run_tests
 
+.PHONY: test clean
