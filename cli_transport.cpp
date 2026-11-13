@@ -27,7 +27,7 @@ cli_transport::cli_transport(){
 
 void cli_transport::set_ip_addr(char* addr){
   memset(ip_addr, 0, 16);
-  memcpy(ip_addr, addr, strlen(addr));
+  strncpy(ip_addr, addr, 15);
 }
 
 void cli_transport::set_port(int p){
@@ -39,55 +39,51 @@ int cli_transport::start_client(){
 
   // specifying address 
   sockaddr_in serverAddress; 
+  memset(&serverAddress, 0, sizeof(serverAddress));
   serverAddress.sin_family = AF_INET; 
   serverAddress.sin_port = htons(port); 
   serverAddress.sin_addr.s_addr = inet_addr(ip_addr); 
 
   // sending connection request 
-  connect(client_socket, (struct sockaddr*)&serverAddress, 
-      sizeof(serverAddress)); 
+  if(connect(client_socket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0){
+    printf("Could not connect to %s:%d\n", ip_addr, port);
+    exit(1);
+  }
 
   read_with_thread(client_socket);
   return 0; 
 }
 
+// TCP is a byte stream: one recv() can return half a frame or several frames,
+// so bytes are kept in `buf` until a whole frame is there.
 void cli_transport::read(int client_socket){
-  int n = -1;
-  char buf[1000];
-  int flag;
+  char buf[1024];
   int hasrecvd = 0;
 
   while(true){
-    do{
-      n = recv(client_socket, buf + hasrecvd, sizeof(buf) - hasrecvd, 0);
-      hasrecvd += n;
-      flag = ioctl(client_socket, FIONREAD, &flag);
-      printf("recv from server, n = %d, flag = %d\n", n, flag);
-    } while(flag > 0);
-
+    int n = recv(client_socket, buf + hasrecvd, sizeof(buf) - hasrecvd, 0);
     if(n <= 0){
-      printf("error\n");
-      break;
+      printf("Disconnected from server\n");
+      exit(0);
     }
-    while(hasrecvd >= 4){
-      uint32_t header = ntohl(*((int*) buf));
-      header >>= 16;
-      uint32_t length = header & 0x0FF;
-      header >>= 8;
-      uint32_t command = header;
+    hasrecvd += n;
 
-      if(hasrecvd >= length + 4){
-        char* base64buf = convert_buffer_to_base64(buf, length + 4);
-        printf("recvd buf = %s\n", base64buf);
-        delete[] base64buf;
-        
-        message_content* msg_packet = deserialize(buf);
-        p_listener->handle_message(msg_packet);
-        hasrecvd -= (length + 4);
-        if(hasrecvd > 0){
-          memcpy(buf, buf + length + 4, hasrecvd);
-        }
+    while(hasrecvd >= 4){
+      uint32_t header;
+      memcpy(&header, buf, 4);
+      header = ntohl(header);
+      int length = (header >> 16) & 0xFF;
+      int frame_size = length + 4;
+      if(hasrecvd < frame_size){
+        break; // wait for the rest of this frame
       }
+
+      message_content* msg_packet = deserialize(buf);
+      p_listener->handle_message(msg_packet);
+      delete msg_packet;
+
+      hasrecvd -= frame_size;
+      memmove(buf, buf + frame_size, hasrecvd);
     }
   }
 }
@@ -106,24 +102,20 @@ void cli_transport::set_listener(observer* ob){
 
 
 void cli_transport::serialize(int command, int length, char* buf){
-  char packet[length + 4];
-  int operation = 0;
-  memset(packet, 0, length+4);
-
-  command <<= 24;
-  operation = command | operation;
-  int length_cpy = length << 16;
-  operation = length_cpy | operation;
-  int n_operation = htonl(operation);
-  memcpy(packet, &n_operation, 4);
-  memcpy(packet+4, buf, length);
-
-  char* message_content = convert_buffer_to_base64(packet, length + 4);
-  printf("send message = %s\n", message_content);
-  delete[] message_content;
+  if(length < 0 || length > 255){
+    printf("Message too long, not sent\n");
+    return;
+  }
+  char packet[4 + 255];
+  uint32_t header = ((uint32_t)(command & 0xFF) << 24) | ((uint32_t)length << 16);
+  uint32_t n_header = htonl(header);
+  memcpy(packet, &n_header, 4);
+  if(length > 0){
+    memcpy(packet + 4, buf, length);
+  }
 
   if(send_msg(packet, length + 4) == -1){
-    printf("Error sending");
+    printf("Error sending\n");
   }
 }
 
@@ -133,27 +125,25 @@ void cli_transport::read_with_thread(int client_socket){
 }
 
 message_content* cli_transport::deserialize(const char* buffer){
-  char message[50];
-  int intmessage = 0;
-  memset(message, 0, 30);
+  uint32_t header;
+  memcpy(&header, buffer, 4);
+  header = ntohl(header);
+  int length = (header >> 16) & 0xFF;
+  int command = (header >> 24) & 0xFF;
 
-  uint32_t header = ntohl(*((int*) buffer));
-  header >>= 16;
-  uint32_t length = header & 0x0FF;
-  header >>= 8;
-  uint32_t command = header;
-  memcpy(message, buffer+4, length);
   message_content* packet = new message_content();
   packet->set_command(command);
-  if(command%2 == 0){
-    packet->set_charmessage(message, length);
+  // Even commands carry text/bytes, odd commands carry an optional int.
+  if(command % 2 == 0){
+    packet->set_charmessage((char*)buffer + 4, length);
   }
-  else{
-    packet->set_intmessage(intmessage);
+  else if(length >= 4){
+    uint32_t value;
+    memcpy(&value, buffer + 4, 4);
+    packet->set_intmessage((int)ntohl(value));
   }
   return packet;
 }
-
 
 void cli_transport::disconnect(){
   if(client_socket != -1){
@@ -162,29 +152,15 @@ void cli_transport::disconnect(){
   }
 }
 
+// Despite the name this is a hex dump, used for debug logging.
 char* cli_transport::convert_buffer_to_base64(char* message, int length){
+  static const char digits[] = "0123456789ABCDEF";
   char* msg = new char[2*length + 1];
-  memset(msg, 0, length*2);
   for(int i = 0; i < length; i++){
-    char one_message = message[i];
-    char first_four = 0;
-    first_four = (one_message >> 4);
-    char base64first_four = first_four & 0x0F;
-    if(base64first_four > 9){
-      msg[2*i] = 'A' + base64first_four - 10;
-    }
-    else{
-      msg[2*i] =  base64first_four + '0';
-    }
-    char base64last_four  = one_message & 0x0F;
-    if(base64last_four > 9){
-      msg[2*i+1] = 'A' + base64last_four - 10;
-    }
-    else{
-      msg[2*i+1] =  base64last_four + '0';
-    }
+    unsigned char byte = message[i];
+    msg[2*i] = digits[byte >> 4];
+    msg[2*i+1] = digits[byte & 0x0F];
   }
-  msg[2*length + 1] = 0;
+  msg[2*length] = 0;
   return msg;
 }
-
