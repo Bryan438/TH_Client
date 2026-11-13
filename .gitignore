@@ -1,2 +1,4 @@
 thclient
 *.o
+tests/run_tests
+*.dSYM/
