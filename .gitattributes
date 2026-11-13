@@ -1,0 +1,7 @@
+# Third-party code copied into the repo: leave it out of GitHub's language stats.
+# json.hpp is the single-header build that nlohmann/json generates from its
+# sources, so it is also marked generated: GitHub then collapses it in diffs.
+third_party/** linguist-vendored linguist-generated
+
+# Headers in this project are C++, not C.
+*.h linguist-language=C++
