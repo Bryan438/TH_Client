@@ -91,3 +91,65 @@ TEST(render_shows_next_hand_countdown){
   st["next_hand_in"] = nullptr;
   CHECK(render_table(st, {}, "", false).find("Type s to start the next hand") != std::string::npos);
 }
+
+static json sample_summary(){
+  return json::parse(R"({
+    "type":"hand_summary","hand":3,"you":1,"blinds":[1,2],"pot":26,"dealer":0,
+    "board":["7d","3d","Ks","2c","Ah"],
+    "players":[
+      {"seat":0,"name":"Alice","stack":100,"end_stack":114,"net":14},
+      {"seat":1,"name":"Bob","stack":100,"end_stack":88,"net":-12,"cards":["Qd","Jd"]},
+      {"seat":2,"name":"Cat","stack":100,"end_stack":98,"net":-2}
+    ],
+    "actions":[
+      {"street":"preflop","seat":1,"name":"Bob","action":"small_blind","amount":1},
+      {"street":"preflop","seat":2,"name":"Cat","action":"big_blind","amount":2},
+      {"street":"preflop","seat":0,"name":"Alice","action":"raise","amount":6,"to":6},
+      {"street":"preflop","seat":1,"name":"Bob","action":"call","amount":5},
+      {"street":"preflop","seat":2,"name":"Cat","action":"fold","amount":0,"reason":"timeout"},
+      {"street":"flop","seat":1,"name":"Bob","action":"check","amount":0},
+      {"street":"flop","seat":0,"name":"Alice","action":"bet","amount":6,"to":6},
+      {"street":"flop","seat":1,"name":"Bob","action":"call","amount":6,"allin":true}
+    ],
+    "showdown":[
+      {"seat":0,"name":"Alice","cards":["Ac","Kd"],"hand":"Two pair"},
+      {"seat":1,"name":"Bob","cards":["Qd","Jd"],"hand":"High card"}
+    ],
+    "winners":[{"seat":0,"name":"Alice","won":26}]
+  })");
+}
+
+TEST(hand_summary_shows_streets_actions_and_result){
+  std::string s = render_hand_summary(sample_summary(), "", false);
+  CHECK(s.find("Last hand: #3") != std::string::npos);
+  CHECK(s.find("Bob (you)") != std::string::npos);
+  CHECK(s.find("Q♦ J♦") != std::string::npos);               // own cards
+  CHECK(s.find("+14") != std::string::npos);
+  CHECK(s.find("Bob posts small blind 1") != std::string::npos);
+  CHECK(s.find("Alice raises to 6") != std::string::npos);
+  CHECK(s.find("Cat folds (ran out of time)") != std::string::npos);
+  CHECK(s.find("Flop   7♦ 3♦ K♠") != std::string::npos);
+  CHECK(s.find("Turn   2♣") != std::string::npos);
+  CHECK(s.find("River   A♥") != std::string::npos);
+  CHECK(s.find("Bob calls 6 (all-in)") != std::string::npos);
+  CHECK(s.find("Alice shows A♣ K♦ - Two pair") != std::string::npos);
+  CHECK(s.find("Alice wins 26") != std::string::npos);
+  CHECK(s.find("Preflop") < s.find("Flop"));
+}
+
+TEST(hand_summary_skips_streets_not_reached){
+  json summary = sample_summary();
+  summary["board"] = json::array();
+  summary["showdown"] = json::array();
+  std::string s = render_hand_summary(summary, "", false);
+  CHECK(s.find("Flop") == std::string::npos);
+  CHECK(s.find("Showdown") == std::string::npos);
+}
+
+TEST(parse_command_h_is_history_not_check){
+  json st = my_turn_state();
+  CHECK(parse_command("h", st).review);
+  CHECK(parse_command("h", st).message.is_null());
+  st["stage"] = "waiting";
+  CHECK(parse_command("history", st).review);
+}

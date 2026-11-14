@@ -200,7 +200,7 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
           << " (type " << paint("s", BOLD, color) << " to start now), ? for help, q to quit\n";
     }
     else{
-      out << "  Type " << paint("s", BOLD, color) << " to start the next hand, ? for help, q to quit\n";
+      out << "  Type " << paint("s", BOLD, color) << " to start the next hand, h for the last hand, ? for help, q to quit\n";
     }
   }
   else if(turn == you && state.contains("actions")){
@@ -227,7 +227,105 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
 
 std::string help_text(){
   return "Commands: s = start hand, f = fold, k = check, c = call, "
-         "r 20 = raise to 20, a = all-in, q = quit";
+         "r 20 = raise to 20, a = all-in, h = last hand, q = quit";
+}
+
+static std::string cards_text(const json& cards, bool color){
+  std::string out;
+  for(const json& c : cards){
+    if(!out.empty()) out += " ";
+    out += card_text(c.get<std::string>(), color);
+  }
+  return out;
+}
+
+static std::string action_text(const json& a){
+  std::string action = a.value("action", "");
+  int amount = a.value("amount", 0);
+  std::string text;
+  if(action == "small_blind") text = "posts small blind " + std::to_string(amount);
+  else if(action == "big_blind") text = "posts big blind " + std::to_string(amount);
+  else if(action == "fold") text = "folds";
+  else if(action == "check") text = "checks";
+  else if(action == "call") text = "calls " + std::to_string(amount);
+  else if(action == "bet") text = "bets " + std::to_string(a.value("to", amount));
+  else if(action == "raise") text = "raises to " + std::to_string(a.value("to", amount));
+  else text = action;
+  if(a.value("allin", false)) text += " (all-in)";
+  std::string reason = a.value("reason", "");
+  if(reason == "timeout") text += " (ran out of time)";
+  else if(reason == "disconnected") text += " (disconnected)";
+  return a.value("name", "?") + " " + text;
+}
+
+std::string render_hand_summary(const json& summary, const std::string& notice, bool color){
+  std::ostringstream out;
+  int you = get_int(summary, "you");
+  std::string blinds;
+  if(summary.contains("blinds") && summary["blinds"].size() == 2){
+    blinds = std::to_string(summary["blinds"][0].get<int>()) + "/" + std::to_string(summary["blinds"][1].get<int>());
+  }
+  out << paint("=== Last hand: #" + std::to_string(get_int(summary, "hand", 0)) + " ===", BOLD, color)
+      << "  Blinds " << blinds << "  Pot " << get_int(summary, "pot", 0) << "\n\n";
+
+  // Players: start stack and result
+  for(const json& p : summary.value("players", json::array())){
+    int net = p.value("net", 0);
+    std::string result = net > 0 ? paint("+" + std::to_string(net), GREEN, color)
+                       : net < 0 ? std::to_string(net) : "0";
+    std::string who = p.value("name", "?") + (p.value("seat", -1) == you ? " (you)" : "");
+    out << "  " << pad_right(who, 22) << pad_right("start " + std::to_string(p.value("stack", 0)), 12)
+        << pad_right(result, 8);
+    if(p.contains("cards")){
+      out << "  " << cards_text(p["cards"], color);
+    }
+    out << "\n";
+  }
+  out << "\n";
+
+  // Streets: board cards as they came, then that street's actions
+  const json board = summary.value("board", json::array());
+  const json actions = summary.value("actions", json::array());
+  const char* streets[] = {"preflop", "flop", "turn", "river"};
+  for(int i = 0; i < 4; i++){
+    std::string street = streets[i];
+    size_t board_needed = i == 0 ? 0 : (size_t)(i + 2);    // flop 3, turn 4, river 5
+    bool reached = board.size() >= board_needed;
+    bool any = false;
+    for(const json& a : actions) any = any || a.value("street", "") == street;
+    if(!reached || (!any && i == 0)){
+      continue;
+    }
+    std::string title = street;
+    title[0] = std::toupper((unsigned char)title[0]);
+    out << "  " << paint(title, BOLD, color);
+    if(i == 1) out << "   " << cards_text(json(std::vector<json>(board.begin(), board.begin() + 3)), color);
+    if(i >= 2) out << "   " << cards_text(json::array({board[i + 1]}), color);
+    out << "\n";
+    for(const json& a : actions){
+      if(a.value("street", "") == street){
+        out << "    " << action_text(a) << "\n";
+      }
+    }
+  }
+
+  const json shown = summary.value("showdown", json::array());
+  if(!shown.empty()){
+    out << "  " << paint("Showdown", BOLD, color) << "\n";
+    for(const json& s : shown){
+      out << "    " << s.value("name", "?") << " shows " << cards_text(s["cards"], color)
+          << " - " << s.value("hand", "") << "\n";
+    }
+  }
+  out << "  " << paint("Result", BOLD, color) << "\n";
+  for(const json& w : summary.value("winners", json::array())){
+    out << "    " << paint(w.value("name", "?") + " wins " + std::to_string(w.value("won", 0)), GREEN, color) << "\n";
+  }
+  out << "\n  Type " << paint("h", BOLD, color) << " to go back to the table\n";
+  if(!notice.empty()){
+    out << paint("  " + notice, RED, color) << "\n";
+  }
+  return out.str();
 }
 
 command_result parse_command(const std::string& line, const json& state){
@@ -247,6 +345,10 @@ command_result parse_command(const std::string& line, const json& state){
     r.help = true;
     return r;
   }
+  if(word == "h" || word == "history"){
+    r.review = true;
+    return r;
+  }
 
   std::string stage = state.value("stage", "waiting");
   if(word == "s" || word == "start"){
@@ -259,7 +361,7 @@ command_result parse_command(const std::string& line, const json& state){
     return r;
   }
 
-  bool is_action = word == "f" || word == "fold" || word == "k" || word == "h" || word == "check" ||
+  bool is_action = word == "f" || word == "fold" || word == "k" || word == "check" ||
                    word == "c" || word == "call" || word == "r" || word == "raise" || word == "a" || word == "allin";
   if(!is_action){
     r.error = "Unknown command \"" + word + "\". " + help_text();
@@ -282,7 +384,7 @@ command_result parse_command(const std::string& line, const json& state){
   if(word == "f" || word == "fold"){
     r.message = action("fold");
   }
-  else if(word == "k" || word == "h" || word == "check"){
+  else if(word == "k" || word == "check"){
     if(!a.value("check", false)){
       r.error = "You can't check: " + std::to_string(call_amount) + " to call (c to call)";
     }

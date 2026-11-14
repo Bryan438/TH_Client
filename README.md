@@ -25,6 +25,7 @@ make
 | `c` | call |
 | `r 20` | raise to 20 (total bet this round) |
 | `a` | all-in |
+| `h` | show the last hand street by street (`h` again to go back) |
 | `?` | help |
 | `q` | quit |
 
@@ -39,7 +40,7 @@ Set `NO_COLOR=1` to turn colors off.
 make test
 ```
 Covers card formatting, column widths (including Chinese names), the table screen and its
-countdowns, and turning typed commands into protocol messages. GitHub Actions runs the build and
+countdowns, the last-hand view, and turning typed commands into protocol messages. GitHub Actions runs the build and
 the tests on Linux and macOS for every push and pull request.
 
 JSON: [nlohmann/json](https://github.com/nlohmann/json) v3.11.3, vendored in `third_party/` (MIT).

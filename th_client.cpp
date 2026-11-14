@@ -22,6 +22,8 @@ std::chrono::steady_clock::time_point state_time;  // when it arrived
 std::deque<std::string> events;   // recent events, newest last
 std::string notice;               // error / hint shown at the bottom
 std::string input;                // what the player is typing (raw mode only)
+json last_summary;                // last finished hand, for "h"
+bool reviewing = false;           // showing last_summary instead of the table
 int my_seat = -1;
 bool color = true;
 bool interactive = false;         // stdin is a terminal and we manage the input line
@@ -122,6 +124,9 @@ void redraw(){
     screen += "=== Texas Hold'em ===\n\n";
     if(!notice.empty()) screen += "  " + notice + "\n";
   }
+  else if(reviewing && !last_summary.is_null()){
+    screen += render_hand_summary(last_summary, notice, color);
+  }
   else{
     screen += render_table(current_view(), events, notice, color);
   }
@@ -167,7 +172,13 @@ void on_line(const std::string& line){
     }
     state = msg;
     state_time = std::chrono::steady_clock::now();
+    if(msg.value("stage", "waiting") != "waiting"){
+      reviewing = false;   // a hand is running: back to the table
+    }
     redraw();
+  }
+  else if(type == "hand_summary"){
+    last_summary = msg;
   }
   else if(type == "event"){
     events.push_back(msg.value("text", ""));
@@ -198,6 +209,17 @@ bool handle_line(const std::string& line, connection& conn){
       }
       notice = r.help ? help_text() : r.error;
       to_send = r.message;
+      if(r.review){
+        if(last_summary.is_null()){
+          notice = "No hand has finished yet";
+        }
+        else{
+          reviewing = !reviewing;
+        }
+      }
+      else if(!to_send.is_null()){
+        reviewing = false;
+      }
     }
     redraw();
   }
