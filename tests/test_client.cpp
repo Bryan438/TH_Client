@@ -80,3 +80,14 @@ TEST(parse_command_rejects_bad_input_locally){
   CHECK(parse_command("c", st).error.find("No hand is running") == 0);
   CHECK(parse_command("s", st).message == json({{"type", "start"}}));
 }
+
+TEST(render_shows_next_hand_countdown){
+  json st = my_turn_state();
+  st["stage"] = "waiting";
+  st["turn"] = -1;
+  st.erase("actions");
+  st["next_hand_in"] = 4;
+  CHECK(render_table(st, {}, "", false).find("Next hand in 4s (type s to start now)") != std::string::npos);
+  st["next_hand_in"] = nullptr;
+  CHECK(render_table(st, {}, "", false).find("Type s to start the next hand") != std::string::npos);
+}

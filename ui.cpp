@@ -195,7 +195,13 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
     timer = " (" + std::to_string(state["turn_time_left"].get<int>()) + "s)";
   }
   if(waiting){
-    out << "  Type " << paint("s", BOLD, color) << " to start the next hand, ? for help, q to quit\n";
+    if(state.contains("next_hand_in") && state["next_hand_in"].is_number_integer()){
+      out << "  Next hand in " << paint(std::to_string(state["next_hand_in"].get<int>()) + "s", BOLD, color)
+          << " (type " << paint("s", BOLD, color) << " to start now), ? for help, q to quit\n";
+    }
+    else{
+      out << "  Type " << paint("s", BOLD, color) << " to start the next hand, ? for help, q to quit\n";
+    }
   }
   else if(turn == you && state.contains("actions")){
     const json& a = state["actions"];
