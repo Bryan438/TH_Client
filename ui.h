@@ -26,7 +26,11 @@ struct command_result{
   std::string error;   // shown to the player instead
   bool quit = false;
   bool help = false;
+  bool review = false; // show / hide the last hand
 };
+
+// The last finished hand ("hand_summary" message), street by street.
+std::string render_hand_summary(const json& summary, const std::string& notice, bool color);
 
 // Turn what the player typed into a server message, checking it against the
 // actions the last state allowed. The server checks again anyway.
