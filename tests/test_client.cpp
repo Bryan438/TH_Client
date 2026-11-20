@@ -153,3 +153,104 @@ TEST(parse_command_h_is_history_not_check){
   st["stage"] = "waiting";
   CHECK(parse_command("history", st).review);
 }
+
+static json alone_with_bots(){
+  return json::parse(R"({
+    "type":"state","stage":"waiting","you":0,"turn":-1,"hand":4,"pot":0,"current_bet":0,
+    "dealer":1,"small_blind":-1,"big_blind":-1,"blinds":[1,2],"solo":true,"game_over":false,
+    "board":[],
+    "seats":[
+      {"seat":0,"name":"Bryan","stack":230,"bet":0,"status":"ready","cards":null,"bot":false},
+      {"seat":1,"name":"RL 1","stack":170,"bet":0,"status":"ready","cards":null,"bot":true,"house":true,"style":"rl"},
+      {"seat":2,"name":"Robo","stack":200,"bet":0,"status":"ready","cards":null,"bot":true}
+    ]
+  })");
+}
+
+TEST(bot_commands_add_and_remove_bots){
+  json st = alone_with_bots();
+  CHECK(parse_command("bot", st).message == json({{"type", "add_bot"}, {"style", "rl"}, {"count", 1}}));
+  CHECK(parse_command("bot equity 2", st).message == json({{"type", "add_bot"}, {"style", "equity"}, {"count", 2}}));
+  CHECK(parse_command("BOT 3 Rules", st).message == json({{"type", "add_bot"}, {"style", "rules"}, {"count", 3}}));
+  CHECK(parse_command("bot magic", st).error.find("Unknown bot style") == 0);
+  CHECK(parse_command("bot 0", st).error == "Add 1 to 11 bots at a time");
+
+  CHECK(parse_command("remove rl 1", st).message == json({{"type", "remove_bot"}, {"seat", 1}}));
+  CHECK(parse_command("rm RL 1", st).message["seat"] == 1);
+  CHECK(parse_command("remove Robo", st).error == "Only bots added with \"bot\" can be removed");
+  CHECK(parse_command("remove Nobody", st).error == "Nobody at the table is called \"Nobody\"");
+  CHECK(parse_command("remove", st).error.find("Remove which bot") == 0);
+  st["stage"] = "flop";
+  CHECK(parse_command("remove RL 1", st).error == "Bots can be removed between hands");
+}
+
+TEST(end_new_vote_and_leave_commands){
+  json st = alone_with_bots();
+  CHECK(parse_command("end", st).message == json({{"type", "end_game"}}));
+  CHECK(parse_command("new", st).message == json({{"type", "new_game"}}));
+  st["solo"] = false;                           // other people: the server puts it to a vote
+  CHECK(parse_command("end", st).message == json({{"type", "end_game"}}));
+  CHECK(parse_command("restart", st).message == json({{"type", "new_game"}}));
+  CHECK(parse_command("yes", st).error == "There is no vote to answer");
+  st["vote"] = {{"kind", "end"}, {"by", "Ann"}, {"agreed", {"Ann"}}, {"waiting", {"Bryan"}}, {"seconds_left", 42}};
+  CHECK(parse_command("yes", st).message == json({{"type", "vote"}, {"agree", true}}));
+  CHECK(parse_command("n", st).message == json({{"type", "vote"}, {"agree", false}}));
+  CHECK(parse_command("leave", st).message == json({{"type", "leave"}}));
+  st["game_over"] = true;
+  CHECK(parse_command("new", st).message == json({{"type", "new_game"}}));
+  CHECK(parse_command("end", st).error.find("already over") != std::string::npos);
+}
+
+TEST(render_shows_an_open_vote){
+  json st = alone_with_bots();
+  st["solo"] = false;
+  st["vote"] = {{"kind", "new"}, {"by", "Ann"}, {"agreed", {"Ann"}}, {"waiting", {"Bryan"}}, {"seconds_left", 42}};
+  std::deque<std::string> events;
+  std::string out = render_table(st, events, "", false);
+  CHECK(out.find("Vote: Ann wants to start over (42s). Waiting for Bryan. Type yes or no") != std::string::npos);
+  CHECK(out.find("Only bots with you") == std::string::npos);
+}
+
+TEST(render_marks_bots_and_shows_how_to_add_them){
+  json st = alone_with_bots();
+  std::string screen = render_table(st, {}, "", false);
+  CHECK(screen.find("RL 1 [rl bot] D") != std::string::npos);
+  CHECK(screen.find("Robo [bot]") != std::string::npos);
+  CHECK(screen.find("Bryan (you)") != std::string::npos && screen.find("Bryan (you) [") == std::string::npos);
+  CHECK(screen.find("end = end the game") != std::string::npos);
+  CHECK(screen.find("to add a bot") == std::string::npos);    // three players ready: no need
+  st["seats"].erase(1);
+  st["seats"].erase(1);
+  CHECK(render_table(st, {}, "", false).find("Type bot to add a bot") != std::string::npos);
+}
+
+TEST(render_shows_standings_after_the_game_ends){
+  json st = alone_with_bots();
+  st["game_over"] = true;
+  st["standings"] = json::parse(R"([
+    {"seat":0,"name":"Bryan","stack":230,"net":30,"bot":false},
+    {"seat":2,"name":"Robo","stack":200,"net":0,"bot":true},
+    {"seat":1,"name":"RL 1","stack":170,"net":-30,"bot":true}
+  ])");
+  std::string screen = render_table(st, {}, "", false);
+  CHECK(screen.find("GAME OVER") != std::string::npos);
+  CHECK(screen.find("Results") != std::string::npos);
+  CHECK(screen.find("Bryan (you)") < screen.find("RL 1  "));
+  CHECK(screen.find("+30") != std::string::npos && screen.find("-30") != std::string::npos);
+  CHECK(screen.find("Type new to start a new game") != std::string::npos);
+}
+
+TEST(render_shows_a_player_who_dropped_out_mid_hand){
+  json st = my_turn_state();
+  st["seats"][0]["status"] = "disconnected";
+  st["seats"][0]["reconnect_in"] = 22;
+  CHECK(render_table(st, {}, "", false).find("away 22s") != std::string::npos);
+  st["seats"][0].erase("reconnect_in");
+  CHECK(render_table(st, {}, "", false).find("offline") != std::string::npos);
+}
+
+TEST(hand_summary_shows_a_returned_bet){
+  json sum = sample_summary();
+  sum["returned"] = json::parse(R"([{"seat":0,"name":"Alice","amount":40}])");
+  CHECK(render_hand_summary(sum, "", false).find("Uncalled bet of 40 returned to Alice") != std::string::npos);
+}

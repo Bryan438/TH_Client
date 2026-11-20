@@ -26,8 +26,19 @@ make
 | `r 20` | raise to 20 (total bet this round) |
 | `a` | all-in |
 | `h` | show the last hand street by street (`h` again to go back) |
+| `bot` | add a bot that the server plays (`bot equity 2`: two equity bots; styles rl, equity, rules, calling, random; default one rl bot) |
+| `remove RL 1` | between hands, send away a bot added with `bot` |
+| `end` | end the game and show who is up and who is down. Alone with bots it happens at once; with other people it asks them, and happens once everyone agrees |
+| `new` | start a new game: everyone back to the starting chips (same rule; no vote after `end`) |
+| `yes` / `no` | answer a vote to end or restart (one no drops it) |
+| `leave` | get up from the table: a hand you are in is folded, your chips go with you; then type a name to sit down again, or `q` |
 | `?` | help |
-| `q` | quit |
+| `q` | quit (your seat is kept for a while, like a dropped connection) |
+
+Bots are marked on the table: `[rl bot]` for one added with `bot`, `[bot]` for one that
+joined over the network (`thbot`). A player who drops out during a hand shows as
+`away 25s`: their cards wait that long for them to come back. These need a server from
+[Texas_Holdem_1](https://github.com/Bryan438/Texas_Holdem_1) PR #13 or later (bots: #15).
 
 If you lose the connection, run the client again with the same name to get your seat and chips back.
 This works because the server gives each player a secret token, which the client saves in
