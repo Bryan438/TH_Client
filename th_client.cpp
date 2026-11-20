@@ -189,8 +189,10 @@ void on_line(const std::string& line){
     my_seat = -1;
     state = json();
     reviewing = false;
-    notice = std::string(msg.value("reason", "") == "kicked" ? "The server removed you from the table."
-                                                             : "You left the table.") +
+    std::string by = msg.value("by", std::string(""));
+    notice = std::string(msg.value("reason", "") != "kicked" ? "You left the table."
+                         : by.empty() ? "The server removed you from the table."
+                                      : by + " removed you from the table.") +
              " Type a name to sit down again, or q to quit.";
     redraw();
   }
