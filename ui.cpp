@@ -98,7 +98,9 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
   if(get_int(state, "hand", 0) > 0){
     out << "  Hand #" << get_int(state, "hand", 0);
   }
-  out << "  " << (waiting ? "WAITING" : upper(stage)) << "  Blinds " << blinds << "\n\n";
+  bool over = state.value("game_over", false);
+  out << "  " << (over ? paint("GAME OVER", YELLOW, color) : waiting ? "WAITING" : upper(stage))
+      << "  Blinds " << blinds << "\n\n";
 
   // Board and pot
   out << "  Board: ";
@@ -119,7 +121,7 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
   out << "\n\n";
 
   // Seats
-  out << "     " << pad_right("Player", 22) << pad_right("Stack", 8) << pad_right("Bet", 6)
+  out << "     " << pad_right("Player", 30) << pad_right("Stack", 8) << pad_right("Bet", 6)
       << pad_right("Cards", 10) << "Status\n";
   if(state.contains("seats")){
     for(const json& s : state["seats"]){
@@ -133,7 +135,11 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
         if(i == sb) tags += " SB";
         if(i == bb) tags += " BB";
       }
-      std::string who = name + (i == you ? " (you)" : "") + tags;
+      // Bots are marked: [rl bot] for one the server plays (added with "bot"), [bot] otherwise.
+      std::string bot_tag;
+      if(s.value("house", false)) bot_tag = " [" + s.value("style", std::string("")) + " bot]";
+      else if(s.value("bot", false)) bot_tag = " [bot]";
+      std::string who = name + (i == you ? " (you)" : "") + bot_tag + tags;
 
       std::string cards;
       if(s.contains("cards") && s["cards"].is_array()){
@@ -149,6 +155,10 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
       if(status == "allin") status_text = paint("ALL-IN", YELLOW, color);
       else if(status == "folded") status_text = "folded";
       else if(status == "sitting_out") status_text = "next hand";
+      else if(status == "disconnected" && s.contains("reconnect_in") && s["reconnect_in"].is_number_integer()){
+        // Dropped out mid-hand: the cards wait this long for them.
+        status_text = paint("away " + std::to_string(s["reconnect_in"].get<int>()) + "s", YELLOW, color);
+      }
       else if(status == "disconnected") status_text = "offline";
       else if(status == "busted") status_text = "busted";
       if(s.contains("hand") && s["hand"].is_string()){
@@ -157,7 +167,7 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
 
       int bet = s.value("bet", 0);
       std::string line = std::string(i == turn ? " >> " : "    ") + " " +
-                         pad_right(who, 22) + pad_right(std::to_string(s.value("stack", 0)), 8) +
+                         pad_right(who, 30) + pad_right(std::to_string(s.value("stack", 0)), 8) +
                          pad_right(bet > 0 ? std::to_string(bet) : "", 6) + pad_right(cards, 10) + status_text;
       bool dim = status == "folded" || status == "disconnected" || status == "sitting_out" || status == "busted";
       if(i == turn) out << paint(line, BOLD, color) << "\n";
@@ -166,6 +176,18 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
     }
   }
   out << "\n";
+
+  // The game was ended: who is up and who is down, best first.
+  if(over && state.contains("standings") && state["standings"].is_array()){
+    out << "  " << paint("Results", BOLD, color) << "\n";
+    for(const json& r : state["standings"]){
+      int net = r.value("net", 0);
+      std::string line = "    " + pad_right(r.value("name", std::string("?")) + (r.value("seat", -1) == you ? " (you)" : ""), 26) +
+                         pad_right(std::to_string(r.value("stack", 0)), 8) + (net > 0 ? "+" : "") + std::to_string(net);
+      out << (net > 0 ? paint(line, GREEN, color) : net < 0 ? paint(line, RED, color) : line) << "\n";
+    }
+    out << "\n";
+  }
 
   // Result of the last hand
   if(state.contains("result") && state["result"].is_array()){
@@ -194,7 +216,19 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
   if(state.contains("turn_time_left") && state["turn_time_left"].is_number_integer()){
     timer = " (" + std::to_string(state["turn_time_left"].get<int>()) + "s)";
   }
-  if(waiting){
+  bool solo = state.value("solo", false);
+  if(over){
+    out << "  Type " << paint("new", BOLD, color) << " to start a new game, ? for help, q to quit\n";
+  }
+  else if(waiting){
+    int ready = 0;
+    if(state.contains("seats")){
+      for(const json& s : state["seats"]) ready += s.value("status", "") == "ready";
+    }
+    if(ready < 2){
+      out << "  Type " << paint("bot", BOLD, color) << " to add a bot (bot equity 2: two equity bots), "
+          << "or wait for another player\n";
+    }
     if(state.contains("next_hand_in") && state["next_hand_in"].is_number_integer()){
       out << "  Next hand in " << paint(std::to_string(state["next_hand_in"].get<int>()) + "s", BOLD, color)
           << " (type " << paint("s", BOLD, color) << " to start now), ? for help, q to quit\n";
@@ -219,6 +253,28 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
     out << "  Waiting for " << seat_name(state, turn) << timer << "...\n";
   }
 
+  // A vote to end or restart: who asked, who still has to answer.
+  if(state.contains("vote") && state["vote"].is_object()){
+    const json& v = state["vote"];
+    std::string what = v.value("kind", "") == "end" ? " wants to end the game" : " wants to start over";
+    std::string waiting, me = seat_name(state, you);
+    bool mine = false;
+    for(const json& n : v.value("waiting", json::array())){
+      std::string name = n.get<std::string>();
+      waiting += (waiting.empty() ? "" : ", ") + name;
+      mine = mine || name == me;
+    }
+    out << paint("  Vote: " + v.value("by", std::string("?")) + what, YELLOW, color)
+        << " (" << v.value("seconds_left", 0) << "s). Waiting for " << waiting << ".";
+    if(mine){
+      out << " Type " << paint("yes", BOLD, color) << " or " << paint("no", BOLD, color);
+    }
+    out << "\n";
+  }
+  else if(solo && !over){
+    out << paint("  Only bots with you: end = end the game and see results, new = start over", DIM, color) << "\n";
+  }
+
   if(!notice.empty()){
     out << paint("  " + notice, RED, color) << "\n";
   }
@@ -227,7 +283,12 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
 
 std::string help_text(){
   return "Commands: s = start hand, f = fold, k = check, c = call, "
-         "r 20 = raise to 20, a = all-in, h = last hand, q = quit";
+         "r 20 = raise to 20, a = all-in, h = last hand, "
+         "bot [style] [count] = add bots (rl, equity, rules, calling, random), "
+         "remove NAME = remove a bot between hands, "
+         "end = end the game, new = new game (with other people at the table, everyone "
+         "has to agree: yes / no), leave = get up from the table, q = quit (your seat is "
+         "kept for a while)";
 }
 
 static std::string cards_text(const json& cards, bool color){
@@ -255,6 +316,8 @@ static std::string action_text(const json& a){
   std::string reason = a.value("reason", "");
   if(reason == "timeout") text += " (ran out of time)";
   else if(reason == "disconnected") text += " (disconnected)";
+  else if(reason == "left") text += " (left the table)";
+  else if(reason == "kicked") text += " (removed)";
   return a.value("name", "?") + " " + text;
 }
 
@@ -318,6 +381,9 @@ std::string render_hand_summary(const json& summary, const std::string& notice, 
     }
   }
   out << "  " << paint("Result", BOLD, color) << "\n";
+  for(const json& back : summary.value("returned", json::array())){
+    out << "    Uncalled bet of " << back.value("amount", 0) << " returned to " << back.value("name", "?") << "\n";
+  }
   for(const json& w : summary.value("winners", json::array())){
     out << "    " << paint(w.value("name", "?") + " wins " + std::to_string(w.value("won", 0)), GREEN, color) << "\n";
   }
@@ -351,6 +417,87 @@ command_result parse_command(const std::string& line, const json& state){
   }
 
   std::string stage = state.value("stage", "waiting");
+  bool over = state.value("game_over", false);
+
+  if(word == "bot" || word == "bots"){
+    // bot, bot equity, bot 3, bot rules 2
+    std::string style = "rl", next;
+    int count = 1;
+    while(in >> next){
+      std::transform(next.begin(), next.end(), next.begin(), [](unsigned char c){ return std::tolower(c); });
+      if(next.find_first_not_of("0123456789") == std::string::npos && next.size() <= 2){
+        count = std::stoi(next);
+      }
+      else if(next == "rl" || next == "equity" || next == "rules" || next == "calling" || next == "random"){
+        style = next;
+      }
+      else{
+        r.error = "Unknown bot style \"" + next + "\": use rl, equity, rules, calling or random";
+        return r;
+      }
+    }
+    if(count < 1 || count > 11){
+      r.error = "Add 1 to 11 bots at a time";
+      return r;
+    }
+    r.message = {{"type", "add_bot"}, {"style", style}, {"count", count}};
+    return r;
+  }
+  if(word == "remove" || word == "rm"){
+    std::string name;
+    std::getline(in, name);
+    name.erase(0, name.find_first_not_of(' '));
+    name.erase(name.find_last_not_of(' ') + 1);
+    auto lower = [](std::string s){
+      std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::tolower(c); });
+      return s;
+    };
+    if(name.empty()){
+      r.error = "Remove which bot? e.g. remove RL 1";
+      return r;
+    }
+    if(stage != "waiting"){
+      r.error = "Bots can be removed between hands";
+      return r;
+    }
+    if(state.contains("seats")){
+      for(const json& s : state["seats"]){
+        if(lower(s.value("name", std::string(""))) != lower(name)) continue;
+        if(!s.value("house", false)){
+          r.error = "Only bots added with \"bot\" can be removed";
+          return r;
+        }
+        r.message = {{"type", "remove_bot"}, {"seat", s.value("seat", -1)}};
+        return r;
+      }
+    }
+    r.error = "Nobody at the table is called \"" + name + "\"";
+    return r;
+  }
+  // With other people at the table, end and new ask them: everyone has to agree.
+  if(word == "end"){
+    if(over) r.error = "The game is already over. Type new for a new one";
+    else r.message = {{"type", "end_game"}};
+    return r;
+  }
+  if(word == "new" || word == "restart"){
+    r.message = {{"type", "new_game"}};
+    return r;
+  }
+  if(word == "yes" || word == "y" || word == "no" || word == "n"){
+    if(!state.contains("vote") || !state["vote"].is_object()){
+      r.error = "There is no vote to answer";
+    }
+    else{
+      r.message = {{"type", "vote"}, {"agree", word[0] == 'y'}};
+    }
+    return r;
+  }
+  if(word == "leave"){
+    r.message = {{"type", "leave"}};
+    return r;
+  }
+
   if(word == "s" || word == "start"){
     if(stage != "waiting"){
       r.error = "A hand is already running";

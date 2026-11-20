@@ -184,6 +184,16 @@ void on_line(const std::string& line){
     events.push_back(msg.value("text", ""));
     while(events.size() > MAX_EVENTS) events.pop_front();
   }
+  else if(type == "left"){
+    // Up from the table: by "leave", or the server removed us.
+    my_seat = -1;
+    state = json();
+    reviewing = false;
+    notice = std::string(msg.value("reason", "") == "kicked" ? "The server removed you from the table."
+                                                             : "You left the table.") +
+             " Type a name to sit down again, or q to quit.";
+    redraw();
+  }
   else if(type == "error"){
     notice = msg.value("message", "error");
     if(my_seat < 0) notice += ". Try another name.";
@@ -198,6 +208,9 @@ bool handle_line(const std::string& line, connection& conn){
     std::lock_guard<std::mutex> guard(lock);
     if(my_seat < 0){
       // Not seated yet: whatever was typed is the name.
+      if(line == "q" && state.is_null() && !notice.empty()){
+        return false;   // after leaving the table: q quits, it is not a name
+      }
       if(!line.empty()){
         to_send = join_message(line);
       }
