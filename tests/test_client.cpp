@@ -175,13 +175,32 @@ TEST(bot_commands_add_and_remove_bots){
   CHECK(parse_command("bot magic", st).error.find("Unknown bot style") == 0);
   CHECK(parse_command("bot 0", st).error == "Add 1 to 11 bots at a time");
 
-  CHECK(parse_command("remove rl 1", st).message == json({{"type", "remove_bot"}, {"seat", 1}}));
+  CHECK(parse_command("kick rl 1", st).message == json({{"type", "kick"}, {"seat", 1}}));
   CHECK(parse_command("rm RL 1", st).message["seat"] == 1);
-  CHECK(parse_command("remove Robo", st).error == "Only bots added with \"bot\" can be removed");
-  CHECK(parse_command("remove Nobody", st).error == "Nobody at the table is called \"Nobody\"");
-  CHECK(parse_command("remove", st).error.find("Remove which bot") == 0);
-  st["stage"] = "flop";
-  CHECK(parse_command("remove RL 1", st).error == "Bots can be removed between hands");
+  CHECK(parse_command("remove Robo", st).message == json({{"type", "kick"}, {"seat", 2}}));
+  CHECK(parse_command("kick Bryan", st).error == "To get up yourself, type leave");
+  CHECK(parse_command("kick Nobody", st).error == "Nobody at the table is called \"Nobody\"");
+  CHECK(parse_command("kick", st).error.find("Remove whom") == 0);
+  CHECK(parse_command("rebuy", st).message == json({{"type", "rebuy"}}));
+}
+
+TEST(only_the_host_deals_adds_bots_and_kicks){
+  json st = alone_with_bots();
+  st["host"] = 0;
+  CHECK(parse_command("s", st).message == json({{"type", "start"}}));
+  st["host"] = 2;                               // someone else runs the table
+  CHECK(parse_command("s", st).error == "Only the host (Robo) can do that");
+  CHECK(parse_command("bot", st).error == "Only the host (Robo) can do that");
+  CHECK(parse_command("kick RL 1", st).error == "Only the host (Robo) can do that");
+  CHECK(parse_command("rebuy", st).message == json({{"type", "rebuy"}}));
+  std::deque<std::string> events;
+  std::string out = render_table(st, events, "", false);
+  CHECK(out.find("Robo [bot] [host]") != std::string::npos);
+  CHECK(out.find("Waiting for Robo, the host, to deal") != std::string::npos);
+  CHECK(out.find("Type s to start") == std::string::npos);
+  st["seats"][0]["stack"] = 0;
+  out = render_table(st, events, "", false);
+  CHECK(out.find("type rebuy to buy in again") != std::string::npos);
 }
 
 TEST(end_new_vote_and_leave_commands){

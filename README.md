@@ -19,23 +19,26 @@ make
 ## Commands
 | Type | Does |
 |---|---|
-| `s` | start the next hand |
+| `s` | start the next hand (the host) |
 | `f` | fold |
 | `k` | check |
 | `c` | call |
 | `r 20` | raise to 20 (total bet this round) |
 | `a` | all-in |
 | `h` | show the last hand street by street (`h` again to go back) |
-| `bot` | add a bot that the server plays (`bot equity 2`: two equity bots; styles rl, equity, rules, calling, random; default one rl bot) |
-| `remove RL 1` | between hands, send away a bot added with `bot` |
+| `bot` | the host adds a bot that the server plays (`bot equity 2`: two equity bots; styles rl, equity, rules, calling, random; default one rl bot) |
+| `kick NAME` (or `remove NAME`) | the host sends someone away: a bot, or a person (who folds if in a hand) |
+| `rebuy` | out of chips: buy in again for the starting chips (counted in the results) |
 | `end` | end the game and show who is up and who is down. Alone with bots it happens at once; with other people it asks them, and happens once everyone agrees |
 | `new` | start a new game: everyone back to the starting chips (same rule; no vote after `end`) |
 | `yes` / `no` | answer a vote to end or restart (one no drops it) |
-| `leave` | get up from the table: a hand you are in is folded, your chips go with you; then type a name to sit down again, or `q` |
+| `leave` | get up from the table: a hand you are in is folded. Your chips are kept for this game: joining again with the same name brings them back. Then type a name to sit down again, or `q` |
 | `?` | help |
 | `q` | quit (your seat is kept for a while, like a dropped connection) |
 
-Bots are marked on the table: `[rl bot]` for one added with `bot`, `[bot]` for one that
+The first person to sit down is the host, marked `[host]`: only they deal, add bots and
+`kick`. When the host leaves, or is away longer than the server's grace period, the next
+person takes over. Bots are marked on the table: `[rl bot]` for one added with `bot`, `[bot]` for one that
 joined over the network (`thbot`). A player who drops out during a hand shows as
 `away 25s`: their cards wait that long for them to come back. These need a server from
 [Texas_Holdem_1](https://github.com/Bryan438/Texas_Holdem_1) PR #13 or later (bots: #15).

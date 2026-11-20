@@ -139,7 +139,8 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
       std::string bot_tag;
       if(s.value("house", false)) bot_tag = " [" + s.value("style", std::string("")) + " bot]";
       else if(s.value("bot", false)) bot_tag = " [bot]";
-      std::string who = name + (i == you ? " (you)" : "") + bot_tag + tags;
+      std::string host_tag = i == get_int(state, "host", -1) ? " [host]" : "";
+      std::string who = name + (i == you ? " (you)" : "") + bot_tag + host_tag + tags;
 
       std::string cards;
       if(s.contains("cards") && s["cards"].is_array()){
@@ -182,7 +183,9 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
     out << "  " << paint("Results", BOLD, color) << "\n";
     for(const json& r : state["standings"]){
       int net = r.value("net", 0);
-      std::string line = "    " + pad_right(r.value("name", std::string("?")) + (r.value("seat", -1) == you ? " (you)" : ""), 26) +
+      std::string label = r.value("name", std::string("?")) + (r.value("seat", -1) == you ? " (you)" : "") +
+                          (r.value("left", false) ? " (left)" : "");
+      std::string line = "    " + pad_right(label, 26) +
                          pad_right(std::to_string(r.value("stack", 0)), 8) + (net > 0 ? "+" : "") + std::to_string(net);
       out << (net > 0 ? paint(line, GREEN, color) : net < 0 ? paint(line, RED, color) : line) << "\n";
     }
@@ -225,11 +228,23 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
     if(state.contains("seats")){
       for(const json& s : state["seats"]) ready += s.value("status", "") == "ready";
     }
-    if(ready < 2){
+    int host = get_int(state, "host", -1);
+    bool leads = host < 0 || host == you;
+    bool busted = false;
+    if(state.contains("seats") && you >= 0 && you < (int)state["seats"].size()){
+      busted = state["seats"][you].value("stack", 0) == 0;
+    }
+    if(busted){
+      out << "  You are out of chips: type " << paint("rebuy", BOLD, color) << " to buy in again\n";
+    }
+    if(ready < 2 && leads){
       out << "  Type " << paint("bot", BOLD, color) << " to add a bot (bot equity 2: two equity bots), "
           << "or wait for another player\n";
     }
-    if(state.contains("next_hand_in") && state["next_hand_in"].is_number_integer()){
+    if(!leads){
+      out << "  Waiting for " << seat_name(state, host) << ", the host, to deal. h for the last hand, ? for help, q to quit\n";
+    }
+    else if(state.contains("next_hand_in") && state["next_hand_in"].is_number_integer()){
       out << "  Next hand in " << paint(std::to_string(state["next_hand_in"].get<int>()) + "s", BOLD, color)
           << " (type " << paint("s", BOLD, color) << " to start now), ? for help, q to quit\n";
     }
@@ -285,7 +300,8 @@ std::string help_text(){
   return "Commands: s = start hand, f = fold, k = check, c = call, "
          "r 20 = raise to 20, a = all-in, h = last hand, "
          "bot [style] [count] = add bots (rl, equity, rules, calling, random), "
-         "remove NAME = remove a bot between hands, "
+         "kick NAME = remove someone from the table, rebuy = buy in again when out of chips "
+         "(dealing, bots and kick are for the host), "
          "end = end the game, new = new game (with other people at the table, everyone "
          "has to agree: yes / no), leave = get up from the table, q = quit (your seat is "
          "kept for a while)";
@@ -440,10 +456,20 @@ command_result parse_command(const std::string& line, const json& state){
       r.error = "Add 1 to 11 bots at a time";
       return r;
     }
+    int host = get_int(state, "host", -1);
+    if(host >= 0 && host != get_int(state, "you", -1)){
+      r.error = "Only the host (" + seat_name(state, host) + ") can do that";
+      return r;
+    }
     r.message = {{"type", "add_bot"}, {"style", style}, {"count", count}};
     return r;
   }
-  if(word == "remove" || word == "rm"){
+  // The host deals, looks after the bots and may send people away.
+  int host = get_int(state, "host", -1);
+  int you = get_int(state, "you", -1);
+  std::string not_host = host >= 0 && host != you
+                           ? "Only the host (" + seat_name(state, host) + ") can do that" : "";
+  if(word == "kick" || word == "remove" || word == "rm"){
     std::string name;
     std::getline(in, name);
     name.erase(0, name.find_first_not_of(' '));
@@ -453,25 +479,29 @@ command_result parse_command(const std::string& line, const json& state){
       return s;
     };
     if(name.empty()){
-      r.error = "Remove which bot? e.g. remove RL 1";
+      r.error = "Remove whom? e.g. kick RL 1";
       return r;
     }
-    if(stage != "waiting"){
-      r.error = "Bots can be removed between hands";
+    if(!not_host.empty()){
+      r.error = not_host;
       return r;
     }
     if(state.contains("seats")){
       for(const json& s : state["seats"]){
         if(lower(s.value("name", std::string(""))) != lower(name)) continue;
-        if(!s.value("house", false)){
-          r.error = "Only bots added with \"bot\" can be removed";
+        if(s.value("seat", -1) == you){
+          r.error = "To get up yourself, type leave";
           return r;
         }
-        r.message = {{"type", "remove_bot"}, {"seat", s.value("seat", -1)}};
+        r.message = {{"type", "kick"}, {"seat", s.value("seat", -1)}};
         return r;
       }
     }
     r.error = "Nobody at the table is called \"" + name + "\"";
+    return r;
+  }
+  if(word == "rebuy"){
+    r.message = {{"type", "rebuy"}};
     return r;
   }
   // With other people at the table, end and new ask them: everyone has to agree.
@@ -499,7 +529,10 @@ command_result parse_command(const std::string& line, const json& state){
   }
 
   if(word == "s" || word == "start"){
-    if(stage != "waiting"){
+    if(!not_host.empty()){
+      r.error = not_host;
+    }
+    else if(stage != "waiting"){
       r.error = "A hand is already running";
     }
     else{
