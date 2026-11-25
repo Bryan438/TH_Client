@@ -38,4 +38,23 @@ command_result parse_command(const std::string& line, const json& state);
 
 std::string help_text();
 
+// ---- The lobby: picking a table before sitting down.
+
+// What the player typed at the table list.
+struct lobby_choice{
+  int table = -1;             // sit down here (-1 = nothing chosen)
+  bool needs_password = false;
+  json create;                // a create_table message to send (null if none)
+  std::string password;       // the new table's password, to sit down with
+  std::string error;          // shown instead
+  bool quit = false;
+};
+
+// "" = the main table, "3" = table 3, "new Friday 2/5 pw=sesame" opens a table
+// (blinds 1/2, 2/5 or 5/10; pw= makes it private), "q" quits.
+lobby_choice parse_lobby_choice(const std::string& line, const json& lobby, const std::string& name);
+
+// The list of tables, for a player who has not sat down yet.
+std::string render_lobby(const json& lobby, const std::string& name, const std::string& notice, bool color);
+
 #endif

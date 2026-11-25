@@ -273,3 +273,46 @@ TEST(hand_summary_shows_a_returned_bet){
   sum["returned"] = json::parse(R"([{"seat":0,"name":"Alice","amount":40}])");
   CHECK(render_hand_summary(sum, "", false).find("Uncalled bet of 40 returned to Alice") != std::string::npos);
 }
+
+static json two_tables(){
+  return json::parse(R"({"type":"lobby","max_tables":20,"can_create":true,"tables":[
+    {"id":1,"name":"Main table","main":true,"private":false,"blinds":[1,2],"chips":200,"seats":3,"people":2,"max":12,"playing":true,"host":"Ann"},
+    {"id":4,"name":"Friday","main":false,"private":true,"blinds":[2,5],"chips":500,"seats":1,"people":1,"max":12,"playing":false,"host":"Bob"}]})");
+}
+
+TEST(picking_a_table_from_the_lobby){
+  json lobby = two_tables();
+  CHECK_EQ(parse_lobby_choice("", lobby, "Cat").table, 1);         // Enter: the main table
+  lobby_choice main = parse_lobby_choice("1", lobby, "Cat");
+  CHECK(main.table == 1 && !main.needs_password);
+  lobby_choice friday = parse_lobby_choice(" 4 ", lobby, "Cat");
+  CHECK(friday.table == 4 && friday.needs_password);
+  CHECK(parse_lobby_choice("7", lobby, "Cat").error.find("no table 7") != std::string::npos);
+  CHECK(parse_lobby_choice("q", lobby, "Cat").quit);
+  CHECK(!parse_lobby_choice("hello", lobby, "Cat").error.empty());
+
+  lobby_choice opened = parse_lobby_choice("new Late night 5/10 pw=owl", lobby, "Cat");
+  CHECK(opened.create == json({{"type", "create_table"}, {"name", "Late night"}, {"blinds", {5, 10}}, {"password", "owl"}}));
+  CHECK(opened.password == "owl");
+  CHECK(parse_lobby_choice("new", lobby, "Cat").create == json({{"type", "create_table"}, {"name", "Cat's table"}}));
+}
+
+TEST(render_lobby_lists_the_tables){
+  std::string out = render_lobby(two_tables(), "Cat", "", false);
+  CHECK(out.find("Main table") != std::string::npos);
+  CHECK(out.find("2/5") != std::string::npos);
+  CHECK(out.find("500 chips") != std::string::npos);
+  CHECK(out.find("1/12 seated") != std::string::npos);
+  CHECK(out.find("host Bob  [password]") != std::string::npos);
+  CHECK(out.find("playing") != std::string::npos);
+  CHECK(out.find("Hello Cat") != std::string::npos);
+  CHECK(render_lobby(json(), "Cat", "", false).find("Waiting for the list") != std::string::npos);
+}
+
+TEST(render_names_the_table){
+  json st = alone_with_bots();
+  std::deque<std::string> events;
+  CHECK(render_table(st, events, "", false).find("Friday") == std::string::npos);
+  st["table"] = {{"id", 4}, {"name", "Friday"}};
+  CHECK(render_table(st, events, "", false).find("=== Texas Hold'em ===  Friday") != std::string::npos);
+}
