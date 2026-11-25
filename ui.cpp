@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <sstream>
 #include "ui.h"
 
@@ -95,6 +96,9 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
     blinds = std::to_string(state["blinds"][0].get<int>()) + "/" + std::to_string(state["blinds"][1].get<int>());
   }
   out << paint("=== Texas Hold'em ===", BOLD, color);
+  if(state.contains("table") && state["table"].is_object()){
+    out << "  " << paint(state["table"].value("name", std::string("")), BOLD, color);
+  }
   if(get_int(state, "hand", 0) > 0){
     out << "  Hand #" << get_int(state, "hand", 0);
   }
@@ -615,4 +619,98 @@ command_result parse_command(const std::string& line, const json& state){
     r.message["amount"] = (int)amount;
   }
   return r;
+}
+
+// ------------------------------------------------------------ the lobby
+
+static const json* find_table(const json& lobby, int id){
+  if(!lobby.is_object() || !lobby.contains("tables")) return nullptr;
+  for(const json& t : lobby["tables"]){
+    if(t.value("id", -1) == id) return &t;
+  }
+  return nullptr;
+}
+
+lobby_choice parse_lobby_choice(const std::string& line, const json& lobby, const std::string& name){
+  lobby_choice c;
+  std::string text = line;
+  text.erase(0, text.find_first_not_of(' '));
+  text.erase(text.find_last_not_of(' ') + 1);
+  if(text == "q" || text == "quit" || text == "exit"){
+    c.quit = true;
+    return c;
+  }
+  if(text.empty()){
+    text = "1";   // the main table
+  }
+  if(text.find_first_not_of("0123456789") == std::string::npos && text.size() <= 6){
+    int id = std::stoi(text);
+    const json* t = find_table(lobby, id);
+    if(!t && !lobby.is_null()){
+      c.error = "There is no table " + text + ". Type one of the numbers on the left";
+      return c;
+    }
+    c.table = id;
+    c.needs_password = t && t->value("private", false);
+    return c;
+  }
+  std::istringstream in(text);
+  std::string word;
+  in >> word;
+  if(word == "new"){
+    std::string table_name, next;
+    json msg = {{"type", "create_table"}};
+    while(in >> next){
+      size_t slash = next.find('/');
+      if(next.rfind("pw=", 0) == 0){
+        c.password = next.substr(3);
+        msg["password"] = c.password;
+      }
+      else if(slash != std::string::npos && slash > 0 &&
+              next.find_first_not_of("0123456789/") == std::string::npos){
+        msg["blinds"] = {std::atoi(next.substr(0, slash).c_str()), std::atoi(next.substr(slash + 1).c_str())};
+      }
+      else{
+        table_name += (table_name.empty() ? "" : " ") + next;
+      }
+    }
+    msg["name"] = table_name.empty() ? name + "'s table" : table_name;
+    c.create = msg;
+    return c;
+  }
+  c.error = "Type a table number (Enter for the main table), new NAME to open a table, or q to quit";
+  return c;
+}
+
+std::string render_lobby(const json& lobby, const std::string& name, const std::string& notice, bool color){
+  std::ostringstream out;
+  out << paint("=== Texas Hold'em: tables ===", BOLD, color) << "\n\n";
+  if(!lobby.is_object() || !lobby.contains("tables")){
+    out << "  Waiting for the list of tables...\n";
+  }
+  else{
+    for(const json& t : lobby["tables"]){
+      std::string blinds = "?";
+      if(t.contains("blinds") && t["blinds"].is_array() && t["blinds"].size() == 2){
+        blinds = std::to_string(t["blinds"][0].get<int>()) + "/" + std::to_string(t["blinds"][1].get<int>());
+      }
+      std::string seats = std::to_string(t.value("seats", 0)) + "/" + std::to_string(t.value("max", 12));
+      std::string host = t.value("host", std::string(""));
+      out << "  " << paint(pad_right(std::to_string(t.value("id", 0)), 4), BOLD, color)
+          << pad_right(t.value("name", std::string("?")), 26) << pad_right(blinds, 7)
+          << pad_right(std::to_string(t.value("chips", 0)) + " chips", 12) << pad_right(seats + " seated", 12)
+          << pad_right(t.value("playing", false) ? "playing" : "waiting", 9)
+          << (host.empty() ? "" : "host " + host)
+          << (t.value("private", false) ? paint("  [password]", YELLOW, color) : "") << "\n";
+    }
+  }
+  out << "\n";
+  if(!name.empty()){
+    out << "  Hello " << name << ". Type a table's number (Enter: table 1), "
+        << paint("new NAME", BOLD, color) << " to open one (new Friday 2/5 pw=secret), or q to quit.\n";
+  }
+  if(!notice.empty()){
+    out << paint("  " + notice, RED, color) << "\n";
+  }
+  return out.str();
 }

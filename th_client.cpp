@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -13,7 +14,7 @@
 #include "net.h"
 #include "ui.h"
 
-// Usage: ./thclient <server ip or host> [port] [name]
+// Usage: ./thclient <server ip or host> [port] [name] [table]
 namespace {
 
 std::mutex lock;
@@ -29,6 +30,15 @@ bool color = true;
 bool interactive = false;         // stdin is a terminal and we manage the input line
 std::string server_key;           // "host:port", for saved tokens
 const size_t MAX_EVENTS = 8;
+
+// Before sitting down: the name, the list of tables, the table being joined.
+std::string my_name;
+json lobby_info;                  // last "lobby" message
+int want_table = 1;               // the table joined (1 = the main one)
+int password_for = -1;            // asking for this private table's password
+std::string new_table_password;   // a table we opened: sit down there with this
+bool creating = false;
+connection* server = nullptr;
 
 // ------------------------------------------------------------ reconnect tokens
 // The server gives every new player a secret token. It is saved here so that
@@ -46,17 +56,24 @@ json load_tokens(){
   return tokens.is_object() ? tokens : json::object();
 }
 
-void save_token(const std::string& name, const std::string& token){
+// A seat's token is per table; the main table keeps the older key, so a seat
+// taken before there were tables is still found.
+std::string token_key(int table, const std::string& name){
+  return table == 1 ? server_key + ":" + name : server_key + ":" + std::to_string(table) + ":" + name;
+}
+
+void save_token(int table, const std::string& name, const std::string& token){
   json tokens = load_tokens();
-  tokens[server_key + ":" + name] = token;
+  tokens[token_key(table, name)] = token;
   std::ofstream out(token_file());
   out << tokens.dump(2) << "\n";
 }
 
-json join_message(const std::string& name){
-  json msg = {{"type", "join"}, {"name", name}};
+json join_message(const std::string& name, int table, const std::string& password = ""){
+  json msg = {{"type", "join"}, {"name", name}, {"table", table}};
+  if(!password.empty()) msg["password"] = password;
   json tokens = load_tokens();
-  std::string key = server_key + ":" + name;
+  std::string key = token_key(table, name);
   if(tokens.contains(key) && tokens[key].is_string()){
     msg["token"] = tokens[key];
   }
@@ -114,13 +131,18 @@ json current_view(){
 }
 
 std::string prompt(){
-  return my_seat < 0 ? "Your name: " : "> ";
+  if(my_seat >= 0) return "> ";
+  if(my_name.empty()) return "Your name: ";
+  return password_for >= 0 ? "Password for table " + std::to_string(password_for) + ": " : "Table: ";
 }
 
 // Caller holds `lock`.
 void redraw(){
   std::string screen = "\033[2J\033[H";
-  if(state.is_null()){
+  if(state.is_null() && !my_name.empty()){
+    screen += render_lobby(lobby_info, my_name, notice, color);
+  }
+  else if(state.is_null()){
     screen += "=== Texas Hold'em ===\n\n";
     if(!notice.empty()) screen += "  " + notice + "\n";
   }
@@ -157,7 +179,7 @@ void on_line(const std::string& line){
     my_seat = msg.value("seat", -1);
     notice = "";
     if(msg.contains("token") && msg["token"].is_string()){
-      save_token(msg.value("name", ""), msg["token"].get<std::string>());
+      save_token(want_table, msg.value("name", ""), msg["token"].get<std::string>());
     }
   }
   else if(type == "state"){
@@ -190,15 +212,36 @@ void on_line(const std::string& line){
     state = json();
     reviewing = false;
     std::string by = msg.value("by", std::string(""));
-    notice = std::string(msg.value("reason", "") != "kicked" ? "You left the table."
-                         : by.empty() ? "The server removed you from the table."
-                                      : by + " removed you from the table.") +
-             " Type a name to sit down again, or q to quit.";
+    std::string reason = msg.value("reason", "");
+    notice = reason == "closed" ? "That table closed."
+           : reason != "kicked" ? "You left the table."
+           : by.empty() ? "The server removed you from the table."
+                        : by + " removed you from the table.";
     redraw();
+  }
+  else if(type == "lobby"){
+    lobby_info = msg;
+    if(my_seat < 0) redraw();
+  }
+  else if(type == "table_created"){
+    // We opened it: sit down there, as its host.
+    if(creating && server){
+      creating = false;
+      want_table = msg.value("table", 1);
+      server->send_line(join_message(my_name, want_table, new_table_password).dump());
+    }
   }
   else if(type == "error"){
     notice = msg.value("message", "error");
-    if(my_seat < 0) notice += ". Try another name.";
+    if(my_seat < 0){
+      creating = false;
+      password_for = -1;
+      // A name the table will not take: ask for another one.
+      if(msg.value("code", "").rfind("name_", 0) == 0){
+        my_name.clear();
+        notice += ". Try another name.";
+      }
+    }
     redraw();
   }
 }
@@ -208,13 +251,37 @@ bool handle_line(const std::string& line, connection& conn){
   json to_send;
   {
     std::lock_guard<std::mutex> guard(lock);
-    if(my_seat < 0){
-      // Not seated yet: whatever was typed is the name.
-      if(line == "q" && state.is_null() && !notice.empty()){
-        return false;   // after leaving the table: q quits, it is not a name
-      }
+    if(my_seat < 0 && my_name.empty()){
+      // First the name...
       if(!line.empty()){
-        to_send = join_message(line);
+        my_name = line;
+        notice.clear();
+      }
+    }
+    else if(my_seat < 0 && password_for >= 0){
+      // ...a private table's password...
+      want_table = password_for;
+      password_for = -1;
+      to_send = join_message(my_name, want_table, line);
+    }
+    else if(my_seat < 0){
+      // ...then a table from the list.
+      lobby_choice c = parse_lobby_choice(line, lobby_info, my_name);
+      if(c.quit){
+        return false;
+      }
+      notice = c.error;
+      if(!c.create.is_null()){
+        creating = true;
+        new_table_password = c.password;
+        to_send = c.create;
+      }
+      else if(c.table >= 0 && c.needs_password){
+        password_for = c.table;
+      }
+      else if(c.table >= 0){
+        want_table = c.table;
+        to_send = join_message(my_name, want_table);
       }
     }
     else{
@@ -297,7 +364,9 @@ void read_keys(connection& conn){
 
 int main(int argc, char* argv[]){
   if(argc < 2){
-    printf("Usage: %s <server ip or host> [port] [name]\n", argv[0]);
+    printf("Usage: %s <server ip or host> [port] [name] [table]\n"
+           "  With a name, sits down at once: at the main table, or at the table given.\n"
+           "  Without one, asks for it and shows the tables to pick from.\n", argv[0]);
     return 1;
   }
   std::string host = argv[1];
@@ -312,6 +381,7 @@ int main(int argc, char* argv[]){
     printf("%s\n", error.c_str());
     return 1;
   }
+  server = &conn;
   conn.start_reader(on_line, []{
     std::lock_guard<std::mutex> guard(lock);
     restore_terminal();
@@ -326,7 +396,9 @@ int main(int argc, char* argv[]){
   {
     std::lock_guard<std::mutex> guard(lock);
     if(argc > 3){
-      conn.send_line(join_message(argv[3]).dump());
+      my_name = argv[3];
+      want_table = argc > 4 ? std::max(1, atoi(argv[4])) : 1;
+      conn.send_line(join_message(my_name, want_table).dump());
     }
     else{
       redraw();

@@ -12,9 +12,27 @@ stays on the input line when the screen redraws.
 Needs a C++17 compiler on macOS or Linux (on Windows use WSL). On a Mac: `xcode-select --install`.
 ```bash
 make
-./thclient <server ip or host> [port] [name]
-./thclient 192.168.1.20 4000 Bryan
+./thclient <server ip or host> [port] [name] [table]
+./thclient 192.168.1.20                # asks for your name, then shows the tables
+./thclient 192.168.1.20 4000 Bryan     # sits down at the main table at once
+./thclient 192.168.1.20 4000 Bryan 3   # ...or at table 3
 ```
+
+## Picking a table
+Without a name on the command line, the client asks for one and then lists the server's
+tables: number, name, blinds, starting chips, how many are seated, whether a hand is
+running, the host, and `[password]` for a private table.
+
+| Type | Does |
+|---|---|
+| a table's number | sit down there (a private table asks for its password) |
+| Enter | sit down at the main table (table 1) |
+| `new Friday 2/5 pw=owl` | open a table and sit down as its host: name, blinds 1/2, 2/5 or 5/10 (default 1/2), `pw=` makes it private |
+| `q` | quit |
+
+`leave` at a table brings you back to this list. Needs a server with the lobby
+([Texas_Holdem_1](https://github.com/Bryan438/Texas_Holdem_1) PR 20 or later); an older
+server has only its one table, and the client sits there as before.
 
 ## Commands
 | Type | Does |
@@ -32,7 +50,7 @@ make
 | `end` | end the game and show who is up and who is down. Alone with bots it happens at once; with other people it asks them, and happens once everyone agrees |
 | `new` | start a new game: everyone back to the starting chips (same rule; no vote after `end`) |
 | `yes` / `no` | answer a vote to end or restart (one no drops it) |
-| `leave` | get up from the table: a hand you are in is folded. Your chips are kept for this game: joining again with the same name brings them back. Then type a name to sit down again, or `q` |
+| `leave` | get up from the table: a hand you are in is folded. Your chips are kept for this game: joining again with the same name brings them back. You are back at the list of tables |
 | `?` | help |
 | `q` | quit (your seat is kept for a while, like a dropped connection) |
 
