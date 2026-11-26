@@ -9,6 +9,7 @@ static const char* BOLD = "\033[1m";
 static const char* DIM = "\033[2m";
 static const char* GREEN = "\033[32m";
 static const char* YELLOW = "\033[33m";
+static const char* CYAN = "\033[36m";
 static const char* RESET = "\033[0m";
 
 static std::string paint(const std::string& text, const char* code, bool color){
@@ -79,8 +80,18 @@ static std::string seat_name(const json& state, int seat){
   return state["seats"][seat]["name"].get<std::string>();
 }
 
+std::string chat_line(const json& msg){
+  std::string text = msg.contains("text") && msg["text"].is_string() ? msg["text"].get<std::string>() : "";
+  std::string name = msg.contains("name") && msg["name"].is_string() ? msg["name"].get<std::string>() : "?";
+  std::string line = name + ": " + text;
+  for(char& c : line){
+    if((unsigned char)c < 0x20 || c == 0x7f) c = ' ';
+  }
+  return line;
+}
+
 std::string render_table(const json& state, const std::deque<std::string>& log,
-                         const std::string& notice, bool color){
+                         const std::string& notice, bool color, const std::deque<std::string>& chat){
   std::ostringstream out;
   std::string stage = state.value("stage", "waiting");
   int you = get_int(state, "you");
@@ -144,7 +155,8 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
       if(s.value("house", false)) bot_tag = " [" + s.value("style", std::string("")) + " bot]";
       else if(s.value("bot", false)) bot_tag = " [bot]";
       std::string host_tag = i == get_int(state, "host", -1) ? " [host]" : "";
-      std::string who = name + (i == you ? " (you)" : "") + bot_tag + host_tag + tags;
+      std::string muted_tag = s.value("muted", false) ? " [muted]" : "";
+      std::string who = name + (i == you ? " (you)" : "") + bot_tag + host_tag + muted_tag + tags;
 
       std::string cards;
       if(s.contains("cards") && s["cards"].is_array()){
@@ -210,6 +222,14 @@ std::string render_table(const json& state, const std::deque<std::string>& log,
   if(!log.empty()){
     for(const std::string& line : log){
       out << paint("  | " + line, DIM, color) << "\n";
+    }
+    out << "\n";
+  }
+
+  // What people said
+  if(!chat.empty()){
+    for(const std::string& line : chat){
+      out << "  " << paint("> ", CYAN, color) << line << "\n";
     }
     out << "\n";
   }
@@ -304,8 +324,9 @@ std::string help_text(){
   return "Commands: s = start hand, f = fold, k = check, c = call, "
          "r 20 = raise to 20, a = all-in, h = last hand, "
          "bot [style] [count] = add bots (rl, equity, rules, calling, random), "
-         "kick NAME = remove someone from the table, rebuy = buy in again when out of chips "
-         "(dealing, bots and kick are for the host), "
+         "kick NAME = remove someone from the table, rebuy = buy in again when out of chips, "
+         "say TEXT = talk to the table, mute NAME / unmute NAME = stop or allow someone's chat, "
+         "close = close the table (dealing, bots, kick, mute and close are for the host), "
          "end = end the game, new = new game (with other people at the table, everyone "
          "has to agree: yes / no), leave = get up from the table, q = quit (your seat is "
          "kept for a while)";
@@ -473,15 +494,71 @@ command_result parse_command(const std::string& line, const json& state){
   int you = get_int(state, "you", -1);
   std::string not_host = host >= 0 && host != you
                            ? "Only the host (" + seat_name(state, host) + ") can do that" : "";
+  // The rest of the line, without the spaces around it.
+  auto rest = [&in]{
+    std::string text;
+    std::getline(in, text);
+    text.erase(0, text.find_first_not_of(' '));
+    text.erase(text.find_last_not_of(' ') + 1);
+    return text;
+  };
+  auto lower = [](std::string s){
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::tolower(c); });
+    return s;
+  };
+  // The seat of someone at the table, by name in any case (null if nobody).
+  auto seat_named = [&](const std::string& name){
+    if(state.contains("seats")){
+      for(const json& s : state["seats"]){
+        if(lower(s.value("name", std::string(""))) == lower(name)) return s;
+      }
+    }
+    return json();
+  };
+  if(word == "say" || word == "chat"){
+    std::string text = rest();
+    const json* me = nullptr;
+    if(state.contains("seats")){
+      for(const json& s : state["seats"]){
+        if(s.value("seat", -1) == you) me = &s;
+      }
+    }
+    if(text.empty()){
+      r.error = "Say what? e.g. say nice hand";
+    }
+    else if(me && me->value("muted", false)){
+      r.error = "The host has muted you: your messages do not reach the table";
+    }
+    else{
+      r.message = {{"type", "chat"}, {"text", text}};
+    }
+    return r;
+  }
+  if(word == "mute" || word == "unmute"){
+    std::string name = rest();
+    json s = seat_named(name);
+    if(name.empty()){
+      r.error = "Whom? e.g. " + word + " Ann";
+    }
+    else if(!not_host.empty()){
+      r.error = not_host;
+    }
+    else if(s.is_null()){
+      r.error = "Nobody at the table is called \"" + name + "\"";
+    }
+    else if(s.value("seat", -1) == you){
+      r.error = "You cannot mute yourself";
+    }
+    else if(s.value("bot", false)){
+      r.error = "Bots do not chat";
+    }
+    else{
+      r.message = {{"type", "mute"}, {"seat", s.value("seat", -1)}, {"muted", word == "mute"}};
+    }
+    return r;
+  }
   if(word == "kick" || word == "remove" || word == "rm"){
-    std::string name;
-    std::getline(in, name);
-    name.erase(0, name.find_first_not_of(' '));
-    name.erase(name.find_last_not_of(' ') + 1);
-    auto lower = [](std::string s){
-      std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::tolower(c); });
-      return s;
-    };
+    std::string name = rest();
     if(name.empty()){
       r.error = "Remove whom? e.g. kick RL 1";
       return r;
@@ -506,6 +583,14 @@ command_result parse_command(const std::string& line, const json& state){
   }
   if(word == "rebuy"){
     r.message = {{"type", "rebuy"}};
+    return r;
+  }
+  // The host is done with a table they opened: everyone goes back to the list.
+  if(word == "close"){
+    bool main = !state.contains("table") || !state["table"].is_object() || get_int(state["table"], "id", 1) == 1;
+    if(main) r.error = "The main table stays open";
+    else if(!not_host.empty()) r.error = not_host;
+    else r.message = {{"type", "close_table"}};
     return r;
   }
   // With other people at the table, end and new ask them: everyone has to agree.

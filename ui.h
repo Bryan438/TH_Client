@@ -18,8 +18,14 @@ int display_width(const std::string& s);
 std::string pad_right(const std::string& s, int width);
 
 // The whole screen for one state message.
+// `chat`: the last lines people said at the table ("Ann: nice hand").
 std::string render_table(const json& state, const std::deque<std::string>& log,
-                         const std::string& notice, bool color);
+                         const std::string& notice, bool color,
+                         const std::deque<std::string>& chat = std::deque<std::string>());
+
+// A chat message ("chat" from the server) as one line, "Ann: nice hand",
+// with anything that could move the cursor or change colours taken out.
+std::string chat_line(const json& msg);
 
 struct command_result{
   json message;        // to send to the server (null if nothing to send)

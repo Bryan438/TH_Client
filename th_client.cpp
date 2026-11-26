@@ -21,6 +21,7 @@ std::mutex lock;
 json state;                       // last full table state from the server
 std::chrono::steady_clock::time_point state_time;  // when it arrived
 std::deque<std::string> events;   // recent events, newest last
+std::deque<std::string> chat;     // what people said at the table, newest last
 std::string notice;               // error / hint shown at the bottom
 std::string input;                // what the player is typing (raw mode only)
 json last_summary;                // last finished hand, for "h"
@@ -30,6 +31,7 @@ bool color = true;
 bool interactive = false;         // stdin is a terminal and we manage the input line
 std::string server_key;           // "host:port", for saved tokens
 const size_t MAX_EVENTS = 8;
+const size_t MAX_CHAT = 5;
 
 // Before sitting down: the name, the list of tables, the table being joined.
 std::string my_name;
@@ -150,7 +152,7 @@ void redraw(){
     screen += render_hand_summary(last_summary, notice, color);
   }
   else{
-    screen += render_table(current_view(), events, notice, color);
+    screen += render_table(current_view(), events, notice, color, chat);
   }
   std::cout << screen << prompt() << input << std::flush;
 }
@@ -202,6 +204,20 @@ void on_line(const std::string& line){
   else if(type == "hand_summary"){
     last_summary = msg;
   }
+  else if(type == "chat_history"){
+    // Comes with every welcome: what was said here before we sat down.
+    chat.clear();
+    for(const json& m : msg.value("messages", json::array())){
+      chat.push_back(chat_line(m));
+    }
+    while(chat.size() > MAX_CHAT) chat.pop_front();
+    redraw();
+  }
+  else if(type == "chat"){
+    chat.push_back(chat_line(msg));
+    while(chat.size() > MAX_CHAT) chat.pop_front();
+    redraw();
+  }
   else if(type == "event"){
     events.push_back(msg.value("text", ""));
     while(events.size() > MAX_EVENTS) events.pop_front();
@@ -213,7 +229,8 @@ void on_line(const std::string& line){
     reviewing = false;
     std::string by = msg.value("by", std::string(""));
     std::string reason = msg.value("reason", "");
-    notice = reason == "closed" ? "That table closed."
+    notice = reason == "closed" ? (by.empty() ? "That table closed." : by == my_name ? "You closed the table."
+                                                                     : by + " closed the table.")
            : reason != "kicked" ? "You left the table."
            : by.empty() ? "The server removed you from the table."
                         : by + " removed you from the table.";
