@@ -316,3 +316,43 @@ TEST(render_names_the_table){
   st["table"] = {{"id", 4}, {"name", "Friday"}};
   CHECK(render_table(st, events, "", false).find("=== Texas Hold'em ===  Friday") != std::string::npos);
 }
+
+TEST(say_and_mute_commands){
+  json st = alone_with_bots();
+  st["host"] = 0;
+  st["seats"][2]["bot"] = false;                // Robo is a person here
+  CHECK(parse_command("say Nice hand, Robo!", st).message == json({{"type", "chat"}, {"text", "Nice hand, Robo!"}}));
+  CHECK(parse_command("SAY   hi  ", st).message == json({{"type", "chat"}, {"text", "hi"}}));
+  CHECK(parse_command("say", st).error.find("Say what") == 0);
+  CHECK(parse_command("mute robo", st).message == json({{"type", "mute"}, {"seat", 2}, {"muted", true}}));
+  CHECK(parse_command("unmute Robo", st).message == json({{"type", "mute"}, {"seat", 2}, {"muted", false}}));
+  CHECK(parse_command("mute Bryan", st).error == "You cannot mute yourself");
+  CHECK(parse_command("mute RL 1", st).error == "Bots do not chat");
+  CHECK(parse_command("mute Nobody", st).error == "Nobody at the table is called \"Nobody\"");
+  st["host"] = 2;
+  CHECK(parse_command("mute RL 1", st).error == "Only the host (Robo) can do that");
+  st["seats"][0]["muted"] = true;                // the host muted us
+  CHECK(parse_command("say hello?", st).error.find("The host has muted you") == 0);
+}
+
+TEST(render_shows_chat_and_who_is_muted){
+  json st = alone_with_bots();
+  st["seats"][2]["muted"] = true;
+  std::deque<std::string> chat = {chat_line(json({{"type", "chat"}, {"name", "Ann"}, {"text", "gl \x1b[31mall"}}))};
+  CHECK(chat[0] == "Ann: gl  [31mall");            // no escape codes from other people
+  std::string out = render_table(st, {}, "", false, chat);
+  CHECK(out.find("Robo [bot] [muted]") != std::string::npos);
+  CHECK(out.find("> Ann: gl  [31mall") != std::string::npos);
+}
+
+TEST(the_host_closes_a_table_of_their_own){
+  json st = alone_with_bots();
+  st["host"] = 0;
+  CHECK(parse_command("close", st).error == "The main table stays open");   // no table: the main one
+  st["table"] = {{"id", 1}, {"name", "Main table"}};
+  CHECK(parse_command("close", st).error == "The main table stays open");
+  st["table"] = {{"id", 4}, {"name", "Friday"}};
+  CHECK(parse_command("close", st).message == json({{"type", "close_table"}}));
+  st["host"] = 2;
+  CHECK(parse_command("close", st).error == "Only the host (Robo) can do that");
+}

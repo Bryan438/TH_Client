@@ -47,6 +47,9 @@ server has only its one table, and the client sits there as before.
 | `bot` | the host adds a bot that the server plays (`bot equity 2`: two equity bots; styles rl, equity, rules, calling, random; default one rl bot) |
 | `kick NAME` (or `remove NAME`) | the host sends someone away: a bot, or a person (who folds if in a hand) |
 | `rebuy` | out of chips: buy in again for the starting chips (counted in the results) |
+| `say TEXT` | talk to everyone at the table; the last few lines show under the table, `>` in front |
+| `mute NAME` / `unmute NAME` | the host stops someone's chat reaching the table, or lets it again (marked `[muted]`) |
+| `close` | the host closes a table they opened (not the main one): everyone at it goes back to the list of tables |
 | `end` | end the game and show who is up and who is down. Alone with bots it happens at once; with other people it asks them, and happens once everyone agrees |
 | `new` | start a new game: everyone back to the starting chips (same rule; no vote after `end`) |
 | `yes` / `no` | answer a vote to end or restart (one no drops it) |
@@ -59,7 +62,8 @@ The first person to sit down is the host, marked `[host]`: only they deal, add b
 person takes over. Bots are marked on the table: `[rl bot]` for one added with `bot`, `[bot]` for one that
 joined over the network (`thbot`). A player who drops out during a hand shows as
 `away 25s`: their cards wait that long for them to come back. These need a server from
-[Texas_Holdem_1](https://github.com/Bryan438/Texas_Holdem_1) PR #13 or later (bots: #15).
+[Texas_Holdem_1](https://github.com/Bryan438/Texas_Holdem_1) PR #13 or later (bots: #15;
+chat: #23).
 
 If you lose the connection, run the client again with the same name to get your seat and chips back.
 This works because the server gives each player a secret token, which the client saves in
